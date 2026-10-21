@@ -85,8 +85,21 @@ public class DocumentService {
         Optional<KbDocument> existing = documentRepository.findByContentHash(hash);
         if (existing.isPresent()) {
             KbDocument d = existing.get();
-            log.info("重复上传，复用已有文档 docId={} status={}", d.getId(), d.getStatus());
-            return d.getId();
+            // ⚠️ 失败/卡住的文档不能直接复用：原逻辑只要 contentHash 相同就返回旧 docId，
+            //    而旧文档已经是 FAILED，前端拿到的还是一条失败记录 —— 用户唯一的自救手段
+            //    「重新上传同一个文件」被这条查重挡死了。所以对未就绪的状态走重试：
+            //    删掉旧记录（连同旧切块），当成新上传重新走一遍。
+            boolean retryable = "FAILED".equals(d.getStatus()) || "PENDING".equals(d.getStatus());
+            if (retryable) {
+                log.info("重复上传命中未就绪文档，重试索引 docId={} status={}", d.getId(), d.getStatus());
+                indexingService.deleteVectorsOf(d.getId());
+                chunkRepository.deleteByDocumentId(d.getId());
+                documentRepository.deleteById(d.getId());
+            }
+            else {
+                log.info("重复上传，复用已有文档 docId={} status={}", d.getId(), d.getStatus());
+                return d.getId();
+            }
         }
 
         Files.createDirectories(uploadDir);

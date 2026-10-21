@@ -129,12 +129,22 @@ public class VectorStoreGateway {
         String vectorId = UUID.randomUUID().toString();
         chunk.setVectorId(vectorId);
 
+        // ⚠️ 不能直接 put：Spring AI 的 Document 构造器里是
+        //    Assert.noNullElements(metadata.values(), "metadata cannot have null values")，
+        //    只要有一个 value 是 null 就直接抛 IllegalArgumentException，整个文档索引失败。
+        //
+        //    而 null 是常态而非异常：PDF 走 PagePdfDocumentReader 拿不到标题层级，
+        //    headingPath 恒为 null；TXT 根本没有 heading_path；pageNumber 在 reader
+        //    没给页码时也是 null。所以这里必须「有值才放」。
+        //
+        //    少放字段不影响溯源：CitationResolver 发现 metadata 缺字段时会回查
+        //    kb_chunk 补上（见 CitationResolver.toSourceRef 的兜底分支）。
         Map<String, Object> metadata = new HashMap<>();
-        metadata.put(META_CHUNK_ID, chunk.getId());
-        metadata.put(META_DOCUMENT_ID, chunk.getDocumentId());
-        metadata.put(META_FILENAME, chunk.getFilename());
-        metadata.put(META_PAGE_NUMBER, chunk.getPageNumber());
-        metadata.put(META_HEADING_PATH, chunk.getHeadingPath());
+        putIfNotNull(metadata, META_CHUNK_ID, chunk.getId());
+        putIfNotNull(metadata, META_DOCUMENT_ID, chunk.getDocumentId());
+        putIfNotNull(metadata, META_FILENAME, chunk.getFilename());
+        putIfNotNull(metadata, META_PAGE_NUMBER, chunk.getPageNumber());
+        putIfNotNull(metadata, META_HEADING_PATH, chunk.getHeadingPath());
 
         return Document.builder()
                 .id(vectorId)
@@ -145,5 +155,12 @@ public class VectorStoreGateway {
 
     public String getTableName() {
         return tableName;
+    }
+
+    /** 只放有值的 key —— Document 的 metadata 不允许 null value */
+    private static void putIfNotNull(Map<String, Object> target, String key, Object value) {
+        if (value != null) {
+            target.put(key, value);
+        }
     }
 }

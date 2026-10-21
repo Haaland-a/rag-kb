@@ -113,15 +113,39 @@ public class IndexingService {
      */
     @Async(AsyncConfig.INDEXING_EXECUTOR)
     public void indexAsync(long documentId, Path storedPath, String fileType) {
+        boolean success = false;
         try {
+            // 先清掉可能残留的旧切块：同一个 docId 走重试时（上传重传 / 重建索引），
+            // 上一次失败已经 insertAll 过的行还在，不清就会翻倍。
+            chunkRepository.deleteByDocumentId(documentId);
             indexBlocking(documentId, storedPath, fileType);
+            success = true;
         }
         catch (Exception e) {
             log.error("索引失败 docId={}", documentId, e);
+            // 失败时把本次已插入的切块清掉。它们既没进向量库、也不会被
+            // updateChunkCount 记上，留在表里只会让详情页显示一堆「有内容但搜不到」的块。
+            deleteQuietlyChunks(documentId);
             documentRepository.updateStatus(documentId, "FAILED", rootMessage(e));
         }
         finally {
-            deleteQuietly(storedPath);
+            // ⚠️ 只有成功才删临时文件。
+            // 原来是无条件删，导致失败文档的原文件也没了 —— 而重建索引
+            // （DocumentService.reindex）正是靠这个文件重跑，结果失败一次就永久卡死，
+            // 界面上只能看到「原文件已被清理，无法重索引」，用户除了删掉重传别无他法。
+            if (success) {
+                deleteQuietly(storedPath);
+            }
+        }
+    }
+
+    /** 清切块失败不该盖住真正的索引异常，所以单独吞掉 */
+    private void deleteQuietlyChunks(long documentId) {
+        try {
+            chunkRepository.deleteByDocumentId(documentId);
+        }
+        catch (Exception e) {
+            log.warn("清理残留切块失败 docId={}", documentId, e);
         }
     }
 
