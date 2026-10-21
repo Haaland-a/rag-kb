@@ -661,6 +661,8 @@ rag-kb/                                  # 仓库根：前后端同一个 git �
 │   ├── db/migrate-v6-chat-log.sql       # 增量：kb_chat（问答记录）
 │   ├── db/migrate-v7-comments-board.sql # 增量：kb_comment（统表）+ kb_user.device_id
 │   └── static/                          # 前端构建产物（build 时从 rag-kb-ui/dist 拷进来）
+├── src/test/java/com/example/kb/        # 单元测试：不连数据库、不调 embedding 模型，毫秒级
+│   └── infrastructure/vectorstore/      # VectorStoreGatewayMetadataTest：metadata 不许有 null
 ├── deploy/https/                        # 线上 HTTPS（Let's Encrypt IP 证书 + nginx）
 │   ├── install-https.sh                 # 一键安装，可重复执行（--staging / --dry-run）
 │   ├── renew-cert.sh                    # 续期，cron 每天 03:17 调
