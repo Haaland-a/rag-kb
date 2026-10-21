@@ -74,6 +74,7 @@ HTTP 80 自动 301 到 HTTPS。细节见 [deploy/https/README.md](deploy/https/R
 | --- | --- | --- |
 | `/` | 个人主页（首屏 / 关于我 / 日常 / 项目 / 照片墙 / 我的知识库 / 页脚）+ 悬浮问答窗 | 所有人 |
 | `/moments` | 日常动态流，可以在每条下面留言（公开留言可见） | 所有人 |
+| `/moments/:id` | 单条动态详情：全文 + 全部留言 + 留言表单 | 所有人 |
 | `/board` | 留言板：独立区域，不挂在某条动态下 | 所有人 |
 | `/login` | 登录 | 所有人 |
 | `/register` | 注册普通用户（一个浏览器只能注册一个） | 游客 |
@@ -363,6 +364,7 @@ kb_moment（日常动态）──1:N──▶ kb_comment（留言，moment_id �
 | GET | `/api/media/public/downloads` | 公开 | 下载列表（只含 visible=true） |
 | POST | `/api/media/public/downloads/{id}/hit` | 公开 | 下载计数 +1（前端 fire-and-forget） |
 | GET | `/api/moments/public` | 公开 | 日常动态流（只含 visible=true） |
+| GET | `/api/moments/public/{id}` | 公开 | 单条动态详情：动态 + 全部公开留言 + 留言总数（不存在/隐藏/已删统一 404） |
 | GET | `/api/comments/public?limit=&offset=` | 公开 | 留言板列表（**游客看不到悄悄话**；带 token 能看到自己被屏蔽的） |
 | POST | `/api/comments/public` | 公开 | 提交留言板留言（游客可发） |
 | GET | `/api/comments/public/moments/{momentId}` | 公开 | 某条动态下的公开留言 |
