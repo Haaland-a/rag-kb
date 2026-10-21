@@ -15,7 +15,10 @@ import java.sql.Timestamp;
 import java.sql.Types;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -178,6 +181,84 @@ public class KbCommentRepository {
     public long countMomentComments(long momentId) {
         Long n = jdbc.queryForObject(
                 "SELECT count(*) FROM kb_comment WHERE moment_id = ?", Long.class, momentId);
+        return n == null ? 0 : n;
+    }
+
+    /**
+     * 一批动态<b>各自</b>的前 {@code perMoment} 条访客可见留言（主页预览用）。
+     *
+     * <p>⚠️ 用窗口函数一次查完，不是「循环每个 momentId 查一次」：
+     * 主页一次要预览 20 条动态，循环就是 20 次数据库往返。
+     * 2C2G 的机器上这种 N+1 是能感觉到的（每次 1-2ms 看着不多，
+     * 但加上连接池排队会放大）。</p>
+     *
+     * <p>⚠️ {@code ROW_NUMBER()} 而不是 {@code LIMIT}：LIMIT 是全局的，
+     * 只会给出「整批里最早的 N 条」，而不是「每条动态各 N 条」。</p>
+     *
+     * @param momentIds 要查的动态 id 列表（空列表直接返回空，不拼 SQL）
+     * @param viewerId  看的人（null = 游客），用于「自己发的被屏蔽留言仍可见」
+     * @param perMoment 每条动态最多取几条
+     */
+    public List<KbComment> findVisiblePreviews(List<Long> momentIds, Long viewerId, int perMoment) {
+        if (momentIds == null || momentIds.isEmpty()) {
+            return List.of();
+        }
+        String in = String.join(",", Collections.nCopies(momentIds.size(), "?"));
+        String sql = "SELECT " + COLUMNS + " FROM ("
+                + "  SELECT c.*, ROW_NUMBER() OVER (PARTITION BY c.moment_id"
+                + "    ORDER BY c.created_at ASC, c.id ASC) AS rn"
+                + "  FROM kb_comment c"
+                + "  WHERE c.moment_id IN (" + in + ")"
+                + "    AND (c.visibility = 'PUBLIC' AND c.status = 'VISIBLE'"
+                + "         OR (c.user_id IS NOT NULL AND c.user_id = ?))"
+                + ") t WHERE t.rn <= ?"
+                + " ORDER BY t.moment_id ASC, t.created_at ASC, t.id ASC";
+
+        Object[] args = new Object[momentIds.size() + 2];
+        for (int i = 0; i < momentIds.size(); i++) {
+            args[i] = momentIds.get(i);
+        }
+        args[momentIds.size()] = viewerIdOrZero(viewerId);
+        args[momentIds.size() + 1] = perMoment;
+        return jdbc.query(sql, rowMapper, args);
+    }
+
+    /**
+     * 一批动态各自<b>访客可见</b>的留言总数。
+     *
+     * <p>主页预览只显示前几条，但角标要显示真实总数 —— 否则
+     * 「10 条留言只看见 3 条，角标也写 3」，用户会以为留言丢了。</p>
+     *
+     * @return momentId → 条数；没有留言的动态不在 map 里（调用方 getOrDefault 0）
+     */
+    public Map<Long, Long> countVisibleByMoments(List<Long> momentIds, Long viewerId) {
+        Map<Long, Long> out = new LinkedHashMap<>();
+        if (momentIds == null || momentIds.isEmpty()) {
+            return out;
+        }
+        String in = String.join(",", Collections.nCopies(momentIds.size(), "?"));
+        String sql = "SELECT moment_id, count(*) AS n FROM kb_comment"
+                + " WHERE moment_id IN (" + in + ")"
+                + "   AND (visibility = 'PUBLIC' AND status = 'VISIBLE'"
+                + "        OR (user_id IS NOT NULL AND user_id = ?))"
+                + " GROUP BY moment_id";
+
+        Object[] args = new Object[momentIds.size() + 1];
+        for (int i = 0; i < momentIds.size(); i++) {
+            args[i] = momentIds.get(i);
+        }
+        args[momentIds.size()] = viewerIdOrZero(viewerId);
+
+        jdbc.query(sql, rs -> {
+            out.put(rs.getLong("moment_id"), rs.getLong("n"));
+        }, args);
+        return out;
+    }
+
+    /** 单条动态下访客可见的留言总数（详情页用） */
+    public long countVisibleForMoment(long momentId, Long viewerId) {
+        String sql = "SELECT count(*) FROM kb_comment WHERE moment_id = ?" + VISIBLE_CLAUSE;
+        Long n = jdbc.queryForObject(sql, Long.class, momentId, viewerIdOrZero(viewerId));
         return n == null ? 0 : n;
     }
 

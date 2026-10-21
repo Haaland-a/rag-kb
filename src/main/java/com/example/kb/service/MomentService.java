@@ -2,8 +2,11 @@ package com.example.kb.service;
 
 import com.example.kb.domain.KbMoment;
 import com.example.kb.domain.KbPhoto;
+import com.example.kb.dto.comment.CommentDto;
+import com.example.kb.dto.media.MomentDetail;
 import com.example.kb.dto.media.MomentDto;
 import com.example.kb.dto.media.MomentPage;
+import com.example.kb.dto.media.MomentPreview;
 import com.example.kb.dto.media.SiteContentRequests;
 import com.example.kb.infrastructure.storage.FileStorage;
 import com.example.kb.repository.KbCommentRepository;
@@ -20,8 +23,11 @@ import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -84,21 +90,32 @@ public class MomentService {
     /** 后台分页上限，防止传个 1000000 把内存打爆 */
     private static final int MAX_PAGE_LIMIT = 100;
 
-    /** 单条动态下的评论最多回多少条（后台看详情用） */
+    /**
+     * 主页每条动态下面摊开几条留言预览。
+     *
+     * <p>⚠️ 不能给太多：主页是「扫一眼」的地方，一条动态下面挂 30 条留言
+     * 会把后面的项目/照片区推到几屏以外。3 条是我试出来的 ——
+     * 1 条看不出是讨论，2 条像巧合，3 条才有「有人在这儿聊」的感觉。
+     * 想看全部就去详情页。</p>
+     */
+    private static final int HOME_PREVIEW_LIMIT = 3;
 
     private final KbMomentRepository momentRepository;
     private final KbCommentRepository commentRepository;
     private final KbPhotoRepository photoRepository;
     private final FileStorage storage;
+    private final CommentService commentService;
 
     public MomentService(KbMomentRepository momentRepository,
                          KbCommentRepository commentRepository,
                          KbPhotoRepository photoRepository,
-                         FileStorage storage) {
+                         FileStorage storage,
+                         CommentService commentService) {
         this.momentRepository = momentRepository;
         this.commentRepository = commentRepository;
         this.photoRepository = photoRepository;
         this.storage = storage;
+        this.commentService = commentService;
     }
 
     // ==================== 动态：站主写 ====================
@@ -344,11 +361,77 @@ public class MomentService {
      * <p>⚠️ 这就是「评论只有站主能看到」这条需求在数据层的落地：
      * 不是前端隐藏一个数字，而是服务端根本不查、不返回。
      * 抓包也看不到。</p>
+     *
+     * <p>⚠️ 但 {@code private} 留言的<b>预览</b>是另一回事（见
+     * {@link #listForVisitorWithPreviews}）—— 公开留言本来就是给所有人看的，
+     * 主页给个预览不违反「悄悄话只有站主能看」，因为 SQL 已经把 PRIVATE
+     * 和 HIDDEN 排除干净了。两个方法的区别只在于「要不要顺带查留言」，
+     * 不是可见性口径不同。</p>
      */
     public List<MomentDto> listForVisitor() {
         return momentRepository.findVisible(HOME_LIMIT, 0)
                 .stream().map(this::toPublicDto).toList();
     }
+
+    /**
+     * 访客详情页的数据：一条动态 + 它下面访客可见的全部留言。
+     *
+     * <p>⚠️ 返回 {@code Optional.empty()} 有三种情况，前端都当 404 处理：
+     * id 不存在、动态被站主设成了「仅自己可见」、动态已删。
+     * <b>不区分这三种</b> —— 区分了等于告诉外面「这个 id 存在但被藏了」。</p>
+     *
+     * @param viewerId 看的人（null = 游客），决定「自己发的被屏蔽留言」是否可见
+     */
+    public Optional<MomentDetail> findForVisitor(long momentId, Long viewerId) {
+        Optional<KbMoment> found = momentRepository.findById(momentId);
+        if (found.isEmpty() || !found.get().isVisible()) {
+            return Optional.empty();
+        }
+        MomentDto dto = toPublicDto(found.get());
+        List<CommentDto> comments = commentService.momentComments(momentId, viewerId, false);
+        long total = commentService.visibleCountForMoment(momentId, viewerId);
+        return Optional.of(new MomentDetail(dto, comments, total));
+    }
+
+    /**
+     * 主页数据：动态列表 + 每条动态的留言预览 + 留言总数。
+     *
+     * <p>为什么单独一个方法而不是让 {@code SiteService} 自己拼两次调用：
+     * 「先查动态、再按这批 id 批量查留言」的顺序和 id 提取是一次事务性的
+     * 读逻辑，分散到两个类里将来改一处忘另一处就会错位。</p>
+     *
+     * <p>⚠️ 预览条数（{@link #HOME_PREVIEW_LIMIT}）和总数是两回事：
+     * 主页每条动态下面只摊开 {{@value #HOME_PREVIEW_LIMIT}} 条，
+     * 但角标要显示真实总数，点进详情页才看全部。</p>
+     *
+     * @param viewerId 看的人（null = 游客）
+     */
+    public List<MomentPreview> listForVisitorWithPreviews(Long viewerId) {
+        List<MomentDto> moments = listForVisitor();
+        if (moments.isEmpty()) {
+            return List.of();
+        }
+        List<Long> ids = moments.stream().map(MomentDto::id).toList();
+        Map<Long, List<CommentDto>> comments = commentService.previewsForMoments(
+                ids, viewerId, HOME_PREVIEW_LIMIT);
+        Map<Long, Long> totals = commentService.visibleCountsForMoments(ids, viewerId);
+
+        List<MomentPreview> out = new ArrayList<>(moments.size());
+        for (MomentDto m : moments) {
+            out.add(new MomentPreview(m,
+                    comments.getOrDefault(m.id(), List.of()),
+                    totals.getOrDefault(m.id(), 0L)));
+        }
+        return out;
+    }
+
+    /**
+     * 一条动态的预览：动态本体 + 前几条公开留言 + 留言总数。
+     *
+     * <p>record 本体在 {@code dto/media/MomentPreview}（因为 {@code SiteInfo}
+     * 直接引用它 —— 留在 Service 里会让 DTO 层反过来依赖 Service 层），
+     * 方法本体就是上面那个 {@link #listForVisitorWithPreviews}。</p>
+     */
 
     // ==================== 评论（已全部迁移到 CommentService） ====================
     //

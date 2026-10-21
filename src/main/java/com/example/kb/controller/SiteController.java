@@ -45,7 +45,19 @@ public class SiteController {
     public R info(HttpServletRequest request) {
         String ip = ipResolver.resolve(request, visitService.isTrustProxy());
         boolean isAdmin = Boolean.TRUE.equals(request.getAttribute("authenticated"));
-        SiteInfo info = siteService.build(ip, isAdmin);
+        SiteInfo info = siteService.build(ip, isAdmin, viewerId(request));
         return R.ok(info);
+    }
+
+    /**
+     * 当前登录用户 id（游客返回 null）。
+     *
+     * <p>只有一种用途：让注册用户在自己的浏览器上看到「自己发的被屏蔽留言」。
+     * 游客没有稳定身份，所以他的被屏蔽留言自己也看不到 —— 这是需求
+     * 「屏蔽后留言者仍可见自己那条」在游客身份下的必然结果。</p>
+     */
+    private static Long viewerId(HttpServletRequest request) {
+        Object v = request.getAttribute("userId");
+        return (v instanceof Long l) ? l : null;
     }
 }

@@ -120,25 +120,65 @@
           <p class="section-sub">随手记下的片段。</p>
 
           <div class="moment-list">
-            <article v-for="m in site.moments" :key="m.id" class="home-moment">
-              <p v-if="m.content" class="home-moment-text">{{ m.content }}</p>
+            <article
+              v-for="mp in site.moments"
+              :key="mp.moment.id"
+              class="home-moment"
+            >
+              <!-- ⚠️ 整条动态可点，进详情页看全部留言。
+                   以前这里是「点图片开大图」，用户反馈说想点动态进详情页，
+                   所以改成整卡 router-link；图片和视频单独 stop 掉自己的点击，
+                   否则点视频控件也会跳页 -->
+              <router-link
+                :to="`/moments/${mp.moment.id}`"
+                class="home-moment-link"
+              >
+                <p v-if="mp.moment.content" class="home-moment-text">{{ mp.moment.content }}</p>
+              </router-link>
               <img
-                v-if="m.mediaType === 'IMAGE' && m.mediaUrl"
-                :src="m.mediaUrl"
+                v-if="mp.moment.mediaType === 'IMAGE' && mp.moment.mediaUrl"
+                :src="mp.moment.mediaUrl"
                 alt=""
                 loading="lazy"
                 class="home-moment-img"
-                @click="viewPhoto({ url: m.mediaUrl, caption: '' })"
+                @click.stop="viewPhoto({ url: mp.moment.mediaUrl, caption: '' })"
               />
               <video
-                v-else-if="m.mediaType === 'VIDEO' && m.mediaUrl"
-                :src="m.mediaUrl"
+                v-else-if="mp.moment.mediaType === 'VIDEO' && mp.moment.mediaUrl"
+                :src="mp.moment.mediaUrl"
                 controls
                 preload="metadata"
                 playsinline
                 class="home-moment-video"
+                @click.stop
               ></video>
-              <span class="home-moment-time">{{ m.createdAt }}</span>
+              <div class="home-moment-foot">
+                <span class="home-moment-time">{{ mp.moment.createdAt }}</span>
+                <router-link :to="`/moments/${mp.moment.id}`" class="home-moment-more">
+                  {{ mp.commentTotal > 0 ? `${mp.commentTotal} 条留言` : '去留言' }} →
+                </router-link>
+              </div>
+
+              <!-- 部分留言预览：主页只看前 3 条，全部在详情页 -->
+              <div v-if="mp.comments?.length" class="home-comments">
+                <div
+                  v-for="c in mp.comments"
+                  :key="c.id"
+                  class="hc-item"
+                  :class="{ 'hc-mine': c.mine, 'hc-hidden': c.hidden }"
+                >
+                  <span class="hc-name">{{ c.nickname }}</span>
+                  <span v-if="c.hidden" class="hc-tag">已屏蔽</span>
+                  <span class="hc-content">{{ c.content }}</span>
+                </div>
+                <router-link
+                  v-if="mp.commentTotal > mp.comments.length"
+                  :to="`/moments/${mp.moment.id}`"
+                  class="hc-more"
+                >
+                  查看全部 {{ mp.commentTotal }} 条 →
+                </router-link>
+              </div>
             </article>
           </div>
 
@@ -942,6 +982,11 @@ async function onCommand(cmd) {
   border-radius: 12px;
   background: #fff;
 }
+.home-moment-link {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
 .home-moment-text {
   margin: 0 0 12px;
   font-size: 14.5px;
@@ -966,10 +1011,76 @@ async function onCommand(cmd) {
   margin-bottom: 10px;
   background: #000;
 }
+.home-moment-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
 .home-moment-time {
   font-size: 12.5px;
   color: #a8b3c4;
   font-variant-numeric: tabular-nums;
+}
+.home-moment-more {
+  font-size: 12.5px;
+  color: #2563eb;
+  text-decoration: none;
+}
+.home-moment-more:hover {
+  text-decoration: underline;
+}
+
+/* 主页的留言预览：只展示前几条，全部去详情页 */
+.home-comments {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed #eef1f5;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.hc-item {
+  padding: 8px 10px;
+  background: #f8fafc;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.hc-item.hc-mine {
+  background: #f0f7ff;
+}
+.hc-item.hc-hidden {
+  background: #fdf3f3;
+  border: 1px dashed #e8b4b4;
+}
+.hc-name {
+  color: #2563eb;
+  font-weight: 600;
+  margin-right: 6px;
+}
+.hc-tag {
+  display: inline-block;
+  padding: 0 5px;
+  margin-right: 6px;
+  font-size: 10.5px;
+  line-height: 16px;
+  color: #b91c1c;
+  background: #fee2e2;
+  border-radius: 3px;
+}
+.hc-content {
+  color: #475569;
+  word-break: break-word;
+}
+.hc-more {
+  align-self: flex-start;
+  font-size: 12.5px;
+  color: #2563eb;
+  text-decoration: none;
+}
+.hc-more:hover {
+  text-decoration: underline;
 }
 
 /* ==================== 页脚 ==================== */

@@ -105,6 +105,10 @@ public class WebConfig implements WebMvcConfigurer {
         registry.addViewController("/").setViewName("forward:/index.html");
         // 游客可见：日常动态全页（主页只展示最近几条，看全部要点进来）
         registry.addViewController("/moments").setViewName("forward:/index.html");
+        // 游客可见：单条动态详情页（主页/列表页点某条动态进来）
+        // ⚠️ 必须单独写一条带数字约束的 —— 少了它，浏览器刷新
+        //    /moments/12 会 404（SPA 路由由前端接管，但首次请求要到后端）
+        registry.addViewController("/moments/{id:[0-9]+}").setViewName("forward:/index.html");
         // 站主可见：登录页 + 后台概览 + 文档管理 + 访客日志 + 个人内容 + 关于我 + 动态管理 + 留言
         registry.addViewController("/login").setViewName("forward:/index.html");
         registry.addViewController("/admin").setViewName("forward:/index.html");

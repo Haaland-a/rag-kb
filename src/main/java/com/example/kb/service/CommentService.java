@@ -114,6 +114,55 @@ public class CommentService {
         return toDtos(rows, viewerId, adminView);
     }
 
+    /**
+     * 一批动态各自的留言预览（主页用）。
+     *
+     * <p>⚠️ 和 {@link #momentComments} 的区别不只是「批量」：这里
+     * <b>只走访客视角</b>（没有 adminView 分支）。主页是公开页面，
+     * 站主自己打开主页看到的也该是公开视图 —— 悄悄话不该在主页上冒出来，
+     * 那是后台留言管理的事。</p>
+     *
+     * @param momentIds 要预览的动态 id
+     * @param viewerId  看的人（null = 游客），决定「自己发的被屏蔽留言」是否可见
+     * @param perMoment 每条动态最多预览几条
+     * @return momentId → 留言 DTO 列表（没有留言的动态不在 map 里）
+     */
+    public Map<Long, List<CommentDto>> previewsForMoments(List<Long> momentIds, Long viewerId,
+                                                          int perMoment) {
+        List<KbComment> rows = commentRepository.findVisiblePreviews(momentIds, viewerId, perMoment);
+        // 按 momentId 分组。用 LinkedHashMap 保持 SQL 里的顺序（老留言在前）
+        Map<Long, List<KbComment>> grouped = new LinkedHashMap<>();
+        for (KbComment c : rows) {
+            if (c.getMomentId() == null) {
+                continue;
+            }
+            grouped.computeIfAbsent(c.getMomentId(), k -> new ArrayList<>()).add(c);
+        }
+
+        Map<Long, List<CommentDto>> out = new LinkedHashMap<>();
+        for (Map.Entry<Long, List<KbComment>> e : grouped.entrySet()) {
+            // adminView 恒 false：主页永远是访客视角
+            out.put(e.getKey(), toDtos(e.getValue(), viewerId, false));
+        }
+        return out;
+    }
+
+    /**
+     * 一批动态各自的访客可见留言总数（角标用）。
+     *
+     * <p>⚠️ 必须和 {@link #previewsForMoments} 用同一套可见性条件，
+     * 否则会出现「角标写 5 条，展开只看到 2 条」。两边共用
+     * {@code KbCommentRepository} 里同一段 SQL 片段就是这个原因。</p>
+     */
+    public Map<Long, Long> visibleCountsForMoments(List<Long> momentIds, Long viewerId) {
+        return commentRepository.countVisibleByMoments(momentIds, viewerId);
+    }
+
+    /** 单条动态下访客可见的留言总数（详情页用，和列表同条件） */
+    public long visibleCountForMoment(long momentId, Long viewerId) {
+        return commentRepository.countVisibleForMoment(momentId, viewerId);
+    }
+
     // ==================== 提交 ====================
 
     /**

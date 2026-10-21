@@ -161,6 +161,14 @@ export const momentApi = {
   // ---- 访客 ----
   publicList: () => http.get('/moments/public'),
 
+  /**
+   * 单条动态 + 它下面访客可见的全部留言。
+   *
+   * <p>和 `commentApi.momentComments` 的区别：这个同时返回动态本体，
+   * 详情页一次请求就能渲染完整页面，不用先查列表再筛出一条。</p>
+   */
+  publicDetail: (id) => http.get(`/moments/public/${id}`),
+
   // ⚠️ 这里原有的 submitComment 也删了：动态留言统一走
   //   commentApi.submitToMoment。旧端点 /moments/public/{id}/comments
   //   用的是 SiteContentRequests.CommentSubmit，没有 visibility 字段，

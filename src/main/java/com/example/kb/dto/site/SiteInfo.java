@@ -2,7 +2,7 @@ package com.example.kb.dto.site;
 
 import com.example.kb.dto.chat.ChatQuota;
 import com.example.kb.dto.media.DownloadDto;
-import com.example.kb.dto.media.MomentDto;
+import com.example.kb.dto.media.MomentPreview;
 import com.example.kb.dto.media.PhotoDto;
 import com.example.kb.dto.media.ProjectDto;
 
@@ -33,7 +33,8 @@ import java.util.List;
  * @param photos          照片墙（只含 visible=true）
  * @param projects        项目展示（只含 visible=true）
  * @param downloads       简历/作品集下载（只含 visible=true）
- * @param moments         最新几条日常动态（只含 visible=true，且<b>不含评论数</b>）
+ * @param moments         最新几条日常动态，每条带几条公开留言预览和留言总数
+ *                        （只含 visible=true；悄悄话永远不会出现在这里）
  */
 public record SiteInfo(String title,
                        SiteOwner owner,
@@ -45,5 +46,5 @@ public record SiteInfo(String title,
                        List<PhotoDto> photos,
                        List<ProjectDto> projects,
                        List<DownloadDto> downloads,
-                       List<MomentDto> moments) {
+                       List<MomentPreview> moments) {
 }

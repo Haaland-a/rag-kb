@@ -4,6 +4,7 @@ import com.example.kb.common.R;
 import com.example.kb.dto.comment.CommentDto;
 import com.example.kb.dto.comment.CommentPage;
 import com.example.kb.dto.comment.CommentRequests;
+import com.example.kb.dto.media.MomentDetail;
 import com.example.kb.dto.media.MomentDto;
 import com.example.kb.dto.media.MomentPage;
 import com.example.kb.dto.media.SiteContentRequests;
@@ -19,6 +20,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -30,6 +32,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 
@@ -144,15 +147,34 @@ public class SiteContentController {
     // ==================== 日常动态：访客 ====================
 
     /**
-     * 访客视角的动态流。
+     * 访客视角的动态流（主页「最近的日常」和 {@code /moments} 页都用它）。
      *
      * <p>⚠️ 返回的 {@link MomentDto} 里 {@code comments} 恒为 0 且
-     * {@code synced}/{@code visible} 都是固定值 —— 服务端根本不查评论数，
+     * {@code synced}/{@code visible} 都是固定值 —— 服务端根本不查这些站主字段，
      * 不是前端藏起来。</p>
      */
     @GetMapping("/moments/public")
-    public R publicMoments() {
+    public R publicMoments(HttpServletRequest request) {
         return R.ok(momentService.listForVisitor());
+    }
+
+    /**
+     * 单条动态的详情页数据（动态 + 它下面访客可见的全部留言）。
+     *
+     * <p>为什么要有这个接口：主页和列表页只给每条动态几条留言预览，
+     * 想看全部就得进详情页；详情页如果复用列表项再单独调留言接口，
+     * 会多一次往返，还会闪一下空留言区。</p>
+     *
+     * <p>⚠️ 动态不存在 / 被设为「仅自己可见」/ 已删 —— 三种情况统一 404，
+     * 不区分。区分了等于告诉外面「这个 id 存在但被藏了」。</p>
+     */
+    @GetMapping("/moments/public/{id}")
+    public R publicMoment(@PathVariable long id, HttpServletRequest request) {
+        return momentService.findForVisitor(id, viewerId(request))
+                .<R>map(R::ok)
+                .orElseGet(() -> {
+                    throw new ResponseStatusException(HttpStatus.NOT_FOUND, "这条动态不存在或已删除");
+                });
     }
 
     /**

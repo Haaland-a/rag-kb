@@ -4,7 +4,7 @@ import com.example.kb.config.SiteProperties;
 import com.example.kb.domain.KbDocument;
 import com.example.kb.dto.chat.ChatQuota;
 import com.example.kb.dto.media.DownloadDto;
-import com.example.kb.dto.media.MomentDto;
+import com.example.kb.dto.media.MomentPreview;
 import com.example.kb.dto.media.PhotoDto;
 import com.example.kb.dto.media.ProjectDto;
 import com.example.kb.dto.site.RecentDocument;
@@ -68,10 +68,12 @@ public class SiteService {
     /**
      * 主页所需的全部公开数据，一次组装完。
      *
-     * @param ip      当前访客 IP（算剩余额度用）
-     * @param isAdmin 是否站主（站主额度不限，显示 -1）
+     * @param ip       当前访客 IP（算剩余额度用）
+     * @param viewerId 当前看的人（null = 游客）；只用来决定「自己发的被屏蔽
+     *                 留言是否可见」，不区分站主 —— 主页对谁都一样
+     * @param isAdmin  是否站主（站主额度不限，显示 -1）
      */
-    public SiteInfo build(String ip, boolean isAdmin) {
+    public SiteInfo build(String ip, boolean isAdmin, Long viewerId) {
         // ⚠️ 站主资料现在优先读数据库（后台可在线编辑），数据库没行才回落 yml。
         // 回落逻辑封装在 ProfileService 里，这里不关心来源
         SiteOwner owner = safeOwner();
@@ -117,7 +119,11 @@ public class SiteService {
         List<PhotoDto> photos = safeList("照片墙", mediaService::listVisiblePhotos);
         List<ProjectDto> projects = safeList("项目展示", mediaService::listVisibleProjects);
         List<DownloadDto> downloads = safeList("下载列表", mediaService::listVisibleDownloads);
-        List<MomentDto> moments = safeList("日常动态", momentService::listForVisitor);
+        // ⚠️ 这里传的是「看的人」，不是「是不是站主」：
+        // 主页永远是公开视角，站主自己打开主页看到的也该是公开视图。
+        // 悄悄话不进主页，只在后台留言管理里出现
+        List<MomentPreview> moments = safeList("日常动态",
+                () -> momentService.listForVisitorWithPreviews(viewerId));
 
         return new SiteInfo(
                 site.getTitle(), owner,

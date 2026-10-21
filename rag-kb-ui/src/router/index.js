@@ -35,6 +35,16 @@ const routes = [
     meta: { title: '日常' }
   },
 
+  // ---- 游客可见：单条动态详情（主页/列表页点某条动态进来） ----
+  // ⚠️ 路径带数字约束：/moments/abc 不该进详情页，应该落到兜底 404→首页。
+  //    同步记得 WebConfig.addViewControllers 里也加了 /moments/{id:[0-9]+}
+  {
+    path: '/moments/:id(\\d+)',
+    name: 'moment-detail',
+    component: () => import('@/views/MomentDetailView.vue'),
+    meta: { title: '日常' }
+  },
+
   // ---- 游客可见：留言板（不用注册也能留言） ----
   {
     path: '/board',
