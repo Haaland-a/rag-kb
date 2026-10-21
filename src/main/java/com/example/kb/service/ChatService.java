@@ -13,7 +13,7 @@ import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Flux;
 
 import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -180,7 +180,7 @@ public class ChatService {
             return Flux.error(new IllegalStateException("所有模型暂时都不可用，请稍后再试"));
         }
         String model = order.get(idx);
-        AtomicBoolean emitted = new AtomicBoolean(false);
+        AtomicInteger emitted = new AtomicInteger(0);
 
         Flux<String> one;
         try {
@@ -200,14 +200,15 @@ public class ChatService {
 
         return one
                 .doOnSubscribe(s -> usedModel.set(model))
-                .doOnNext(t -> emitted.set(true))
+                .doOnNext(t -> emitted.incrementAndGet())
                 .doOnComplete(() -> modelPool.reportSuccess(model))
                 .onErrorResume(e -> {
                     modelPool.reportFailure(model, e);
-                    if (emitted.get()) {
+                    int sent = emitted.get();
+                    if (sent > 0) {
                         // 已经吐字了，换模型会拼出两段风格不同的回答 —— 宁可报错
-                        log.warn("模型 {} 在输出中途失败，不切换（已发出 {} 个 token）：{}",
-                                model, "若干", rootMessage(e));
+                        log.warn("模型 {} 在输出中途失败（已发出 {} 个 token），不切换：{}",
+                                model, sent, rootMessage(e));
                         return Flux.error(e);
                     }
                     log.info("模型 {} 建连阶段失败，静默切换到下一个：{}", model, rootMessage(e));
