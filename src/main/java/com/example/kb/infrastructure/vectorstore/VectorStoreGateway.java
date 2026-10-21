@@ -1,0 +1,149 @@
+package com.example.kb.infrastructure.vectorstore;
+
+import com.example.kb.domain.KbChunk;
+import org.springframework.ai.document.Document;
+import org.springframework.ai.vectorstore.SearchRequest;
+import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
+/**
+ * PgVectorStore 的封装层（第 1 周的关键抽象）。
+ *
+ * <p>为什么要有这一层，而不是到处调 {@link VectorStore}：</p>
+ * <ul>
+ *   <li><b>metadata key 约定集中</b>：PgVectorStore 的 metadata 是 jsonb，
+ *       {@code documentId} / {@code chunkId} 这两个关联键一旦散落在各业务类里，
+ *       拼错一个字母就静默查不到数据（json path 过滤失败不报错，只返回空）。</li>
+ *   <li><b>UUID 约束集中</b>：PgIdType.UUID 下 {@code doAdd} 走
+ *       {@code UUID.fromString(document.getId())}，id 不是合法 UUID 字符串启动即炸。
+ *       统一在这里生成，业务层不用关心。</li>
+ *   <li><b>第 2 周换实现只改一个文件</b>：混合检索（向量 + pg_trgm + RRF）要自己写 SQL，
+ *       或者迁到「完全自建 kb_chunk 表」，调用方都不动。</li>
+ * </ul>
+ */
+@Component
+public class VectorStoreGateway {
+
+    /** 关联键：结构化 kb_chunk.id */
+    public static final String META_CHUNK_ID = "chunkId";
+    /** 关联键：kb_document.id */
+    public static final String META_DOCUMENT_ID = "documentId";
+    /** 免回查冗余：SSE sources 事件直接渲染用 */
+    public static final String META_FILENAME = "filename";
+    public static final String META_PAGE_NUMBER = "pageNumber";
+    public static final String META_HEADING_PATH = "headingPath";
+
+    private final VectorStore vectorStore;
+    private final String tableName;
+    private final int topK;
+    private final double similarityThreshold;
+
+    public VectorStoreGateway(
+            VectorStore vectorStore,
+            @Value("${rag.vector-store.table-name}") String tableName,
+            @Value("${rag.retrieval.top-k}") int topK,
+            @Value("${rag.retrieval.similarity-threshold}") double similarityThreshold) {
+        this.vectorStore = vectorStore;
+        this.tableName = tableName;
+        this.topK = topK;
+        this.similarityThreshold = similarityThreshold;
+    }
+
+    /**
+     * 写入一批 chunk。
+     *
+     * <p>注意：PgVectorStore 内部会调 embeddingModel.embed()，也就是说
+     * embedding 是这里发生的，调用方不需要自己 embed。</p>
+     *
+     * @param chunks 已切好的块，必须已设置 documentId
+     */
+    public void add(List<KbChunk> chunks) {
+        if (chunks == null || chunks.isEmpty()) {
+            return;
+        }
+        List<Document> documents = chunks.stream()
+                .map(this::toDocument)
+                .toList();
+        vectorStore.add(documents);
+    }
+
+    /**
+     * 按 documentId 删除该文档的全部向量。
+     *
+     * <p>用 {@link FilterExpressionBuilder#eq} 而不是裸字符串，避免手拼 json path 出错
+     * （json path 过滤失败不报错，只静默返回空，极难排查）。</p>
+     */
+    public void deleteByDocumentId(long documentId) {
+        FilterExpressionBuilder builder = new FilterExpressionBuilder();
+        vectorStore.delete(builder.eq(META_DOCUMENT_ID, documentId).build());
+    }
+
+    /** 按 vectorId 精确删单个向量（重新索引单块时用） */
+    public void deleteByVectorId(String vectorId) {
+        vectorStore.delete(List.of(vectorId));
+    }
+
+    /**
+     * 向量检索，可按 documentIds 过滤。
+     *
+     * @param documentIds 为空 = 全库检索；非空 = 只在这些文档里找
+     * @return Document 列表，metadata 里的 META_* key 由 toDocument 保证存在
+     */
+    public List<Document> search(String query, List<Long> documentIds) {
+        return search(query, documentIds, topK);
+    }
+
+    /**
+     * 同上，但覆盖 topK（前端可以按需调整召回数）。
+     *
+     * <p>⚠️ topK 只影响召回，不相似度阈值；阈值仍走配置，避免前端把阈值调到 0
+     * 导致一次召回几千条垃圾结果。</p>
+     */
+    public List<Document> search(String query, List<Long> documentIds, int topK) {
+        SearchRequest.Builder builder = SearchRequest.builder()
+                .query(query)
+                .topK(topK)
+                .similarityThreshold(similarityThreshold);
+        if (documentIds != null && !documentIds.isEmpty()) {
+            FilterExpressionBuilder feb = new FilterExpressionBuilder();
+            builder.filterExpression(feb.in(META_DOCUMENT_ID, documentIds.toArray()).build());
+        }
+        return vectorStore.similaritySearch(builder.build());
+    }
+
+    /**
+     * KbChunk → Spring AI Document，并把 metadata key 约定落到这一处。
+     *
+     * <p>id 必须是合法 UUID 字符串（PgVectorStore 的 UUID.fromString 会解析它）。
+     * 用 UUID.randomUUID() 生成后回填 chunk.vectorId，业务侧落库时一起存，
+     * 这样 kb_chunk.vector_id ↔ vector_store.id 双向可查。</p>
+     */
+    public Document toDocument(KbChunk chunk) {
+        String vectorId = UUID.randomUUID().toString();
+        chunk.setVectorId(vectorId);
+
+        Map<String, Object> metadata = new HashMap<>();
+        metadata.put(META_CHUNK_ID, chunk.getId());
+        metadata.put(META_DOCUMENT_ID, chunk.getDocumentId());
+        metadata.put(META_FILENAME, chunk.getFilename());
+        metadata.put(META_PAGE_NUMBER, chunk.getPageNumber());
+        metadata.put(META_HEADING_PATH, chunk.getHeadingPath());
+
+        return Document.builder()
+                .id(vectorId)
+                .text(chunk.getContent())
+                .metadata(metadata)
+                .build();
+    }
+
+    public String getTableName() {
+        return tableName;
+    }
+}

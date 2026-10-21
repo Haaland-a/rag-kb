@@ -1,0 +1,31 @@
+### 编译期踩坑记录（2026-10-19 实测，写代码前先看这段，别再踩）
+
+1. `MetadataMode` 在 **`org.springframework.ai.document.MetadataMode`**（spring-ai-commons），
+   不在 `org.springframework.ai.model`。import 写错直接「找不到符号」。
+2. `PgDistanceType` / `PgIndexType` **不是独立类**，是
+   `PgVectorStore.PgDistanceType` / `PgVectorStore.PgIndexType` 这两个嵌套枚举
+   （jar 里是 `PgVectorStore$PgDistanceType.class`）。直接 import 顶层名找不到。
+3. `SearchRequest` 的内部 builder 类叫 **`SearchRequest.Builder`**，
+   不是 `SearchRequestBuilder`。
+4. `FilterExpressionBuilder` 的方法（`eq` / `in` / `and` / `or` / `nin` ...）是**实例方法**，
+   没有静态入口，必须先 `new FilterExpressionBuilder()` 再链式调用。
+5. `OpenAiApi` 在 **`org.springframework.ai.openai.api.OpenAiApi`**，
+   `OpenAiEmbeddingModel` / `OpenAiEmbeddingOptions` 在 `org.springframework.ai.openai`。
+6. PDFBox 传递依赖解析到 **3.0.7**（不是 3.0.8）——spring-ai-pdf-document-reader 1.1.8
+   编译基线就是 3.0.7。别再显式声明版本，让它走传递依赖。
+7. `OpenAiEmbeddingModel` 没有 `getEmbeddingOptions()` 这类 getter，
+   要拿 dimensions 就自己从 `@Value` 传进来，别去 model 上掏。
+8. ⚠️ **不要自己定义 `ChatModel` / `ChatClient` bean**：spring-ai-starter-model-openai 的
+   自动配置已按 `spring.ai.openai.*` 装配好，再定义同名 bean 会覆盖导致启动失败或行为分裂。
+   业务层直接注入 `ChatClient.Builder`。
+
+### Vue history 模式回退说明
+本项目 WebConfig.addViewControllers 显式列了三条 forward 规则
+（`/`、`/documents`、`/documents/{id:[0-9]+}`）→ `forward:/index.html`。
+
+为什么不依赖 Spring Boot 默认行为：Boot 3.3+ 的 ResourceHttpRequestHandler 只在
+**「静态资源路径下找不到文件」**时才 fallback 到 index.html，行为依赖 Boot 小版本，
+且没法控制「哪些路径该回退」。显式写的好处是 /api 和 /actuator 天然被排除
+（根本没匹配上规则），不会出现刷新页面把 API 请求吞进 index.html 的怪事。
+新增前端路由时，记得在这里补一条对应规则。
+

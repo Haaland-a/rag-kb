@@ -1,0 +1,59 @@
+*.iml
+.idea/
+.vscode/
+target/
+!.mvn/wrapper/maven-wrapper.jar
+
+# 前端
+#
+# ⚠️ 只忽略 node_modules 和构建产物，**源码必须入库**。
+# 之前这里写过 `rag-kb-ui/` 整目录忽略，结果 31 个源文件（0.29 MB）
+# 完全裸放在磁盘上、没有任何版本历史 —— 代码改坏了没法回滚，
+# 换机器也没有可拉取的前端。构建产物 src/main/resources/static/
+# 反而是入库的（部署直接用它），所以「产物有历史、源码没有」，很反讽。
+rag-kb-ui/node_modules/
+rag-kb-ui/dist/
+
+# ============================================================
+# 凭据类文件 —— 一条都不要入库
+# ============================================================
+# 生产配置：数据库密码、DashScope key、OSS AK/SK 全在里面。
+# 它只应该存在于服务器上（chmod 600），本机不该有这个文件；万一有，也不能进 git。
+application-prod.yml
+application-prod*.yml
+application-local.yml
+application-prod.yaml
+**/application-prod*.yml
+
+# 环境变量文件
+.env
+.env.*
+!.env.example
+
+# 密钥/证书
+*.pem
+*.key
+*.p12
+*.jks
+*.keystore
+id_rsa*
+id_ed25519*
+
+# 配置文件备份：改密码时顺手 cp 出来的 .bak 最容易漏出来
+*.bak
+*.bak[0-9]*
+*.bak-*
+*.orig
+*.rej
+
+# 本机整理出来的敏感信息总表（放在仓库外，这里再忽略一次兜底）
+敏感信息清单.csv
+*敏感信息*.csv
+
+# 部署产物 / 临时文件
+uploads/
+*.log
+rag-kb.b64
+
+# scp -o UserKnownHostsFile=NUL 会在 Windows 上创建同名文件
+NUL

@@ -1,0 +1,190 @@
+server:
+  # 只监听本机回环地址。公网入口是 nginx 的 80/443，nginx 再反代到 127.0.0.1:8080。
+  # 为什么必须限制：不限制的话 Tomcat 监听 0.0.0.0:8080，只要安全组还开着 8080，
+  # 访客就能绕过 nginx 用 http://IP:8080 明文访问全站 —— 登录密码、注册密码、
+  # 悄悄话全都在网上裸奔，HTTPS 等于白做。
+  # 限制在这里而不是只靠安全组：安全组是控制台里的状态，换台机器/重建规则就可能忘，
+  # 而这一行跟着代码走，改错了 review 时看得见。
+  # 万一 nginx 挂了：SSH 上去 `systemctl status nginx`，或者临时把这一行注释掉重启。
+  # 没上 nginx 的纯本机开发想用局域网设备访问时，设环境变量 SERVER_ADDRESS=0.0.0.0。
+  address: ${SERVER_ADDRESS:127.0.0.1}
+  port: 8080
+  # 应用跑在 nginx 反代后面（公网 80/443 → nginx → 127.0.0.1:8080）。
+  # native 让 Tomcat 认 X-Forwarded-For / X-Forwarded-Proto：
+  #   - request.getScheme() 变 https，将来若生成绝对 URL 或做重定向不会掉回 http
+  #   - getRemoteAddr() 被改写为 nginx 传来的真实客户端地址
+  # 只有 nginx 从 127.0.0.1 连进来才可信（Tomcat 默认 internalProxies 覆盖
+  # 127.0.0.0/8、10/8、192.168/16、172.16/12），公网直连伪造这两个头无效。
+  # ⚠️ 如果哪天 8080 直接暴露到公网，这两行必须去掉。
+  forward-headers-strategy: native
+  # 上传大 PDF 时 multipart 上限。2C2G 上单文件别超 50MB，再大走分片（第 1 周不做）
+  tomcat:
+    max-swallow-size: -1
+    threads:
+      max: 50
+
+spring:
+  application:
+    name: rag-kb
+
+  # ---------- 数据源：pgvector/pgvector:pg16 容器（bridged 下宿主直连） ----------
+  datasource:
+    url: ${RAG_DB_URL:jdbc:postgresql://127.0.0.1:5432/rag}
+    username: ${RAG_DB_USER:postgres}
+    # ⚠️ 这里的默认值只是本地开发用的，README 里的 docker run 用的也是它。
+    #    生产必须用 RAG_DB_PASSWORD 环境变量覆盖，且别用这种一眼能猜到的密码。
+    password: ${RAG_DB_PASSWORD:ragdev}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      # 2C2G：PG 侧 max_connections=100，这里留 10 就够（单用户演示级）
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 60MB
+
+  # ---------- Spring AI：阿里云百炼 OpenAI 兼容端点 ----------
+  #
+  # ⚠️ base-url 结尾千万不要带 /v1！
+  #    Spring AI 的 OpenAiApi 默认 path 是 /v1/chat/completions 和 /v1/embeddings。
+  #    百炼的兼容端点本身就是 https://dashscope.aliyuncs.com/compatible-mode/v1，
+  #    如果 base-url 也写 /v1，实际请求会变成 .../compatible-mode/v1/v1/embeddings → 404。
+  #    这个坑排查了很久：curl 打正确 URL 是 200，走的却是错的 URL。
+  #
+  ai:
+    openai:
+      base-url: ${OPENAI_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode}
+      api-key: ${OPENAI_API_KEY:}
+      chat:
+        options:
+          # 免费额度可用的模型（实测 200）：qwen3.8-flash / qwen3.7-flash /
+          # deepseek-v4.1-flash / qwen3.8-27b / qwen3.8-max-0902 / kimi-k3
+          # ⚠️ qwen3.7-plus 会 403（AllocationQuota.FreeTierOnly）——不在免费清单里
+          model: ${RAG_CHAT_MODEL:qwen3.7-flash}
+          temperature: 0.2
+      embedding:
+        options:
+          # 百炼的向量模型（只有这两个，另一个 qwen3.7-text-rerank 是重排不是 embedding）
+          model: ${RAG_EMBEDDING_MODEL:qwen3.7-text-embedding-flash}
+          # 1024 维。换模型必须同步改 PgVectorStore.builder().dimensions()
+          # 并删表重建索引，否则 insert 直接维度不匹配报错
+          dimensions: ${RAG_EMBEDDING_DIMENSIONS:1024}
+
+# ---------- 我们的业务配置 ----------
+# ⚠️ 必须在顶层 rag，不能嵌在 spring: 下面。
+#    spring.rag.* 不是 Spring 的命名空间，绑不上 @Value("${rag.xxx}")，
+#    结果就是配置写了却静默用默认值 —— 排查起来极其费时。
+rag:
+  vector-store:
+    schema-name: ${RAG_VECTOR_SCHEMA:public}
+    table-name: ${RAG_VECTOR_TABLE:vector_store}
+    # batch insert 的上限，防止一次 embed 太多把 2G 内存打爆
+    max-document-batch-size: ${RAG_VECTOR_BATCH:100}
+  chunk:
+    max-tokens: ${RAG_CHUNK_MAX_TOKENS:512}
+    overlap-tokens: ${RAG_CHUNK_OVERLAP:80}
+  retrieval:
+    top-k: ${RAG_RETRIEVAL_TOP_K:5}
+    # cosine distance 阈值，0 = 全收。0.35 是经验值，第 2 周用评测集校准
+    similarity-threshold: ${RAG_RETRIEVAL_THRESHOLD:0.35}
+
+  # ---------- 问答 ----------
+  chat:
+    # 关掉推理模型的「思考模式」。
+    # qwen3.x / deepseek-v4.1 默认先吐几十段 reasoning_content 再吐正文，
+    # 对「打开小窗口问一句」这个场景等于十几秒白屏。实测关掉后：
+    #   qwen3.8-flash  1860ms → 1176ms
+    # 换成不认 enable_thinking 的服务商（纯 OpenAI）时改成 false，否则可能 400
+    disable-thinking: ${RAG_DISABLE_THINKING:true}
+
+  # ---------- 按 IP 限流 ----------
+  rate-limit:
+    # 每个 IP 每小时能问几次。站主不受限
+    chat-per-hour: ${RAG_CHAT_PER_HOUR:20}
+
+  # ---------- 访客记录 ----------
+  visit:
+    # 是否信任 X-Forwarded-For。现在前面有 nginx 反代，必须为 true，
+    # 否则所有访客都会被记成 127.0.0.1，按 IP 限流失效（全站共用一个额度）。
+    # nginx 侧写的是「覆盖」XFF（proxy_set_header X-Forwarded-For $remote_addr），
+    # 客户端自带的假 XFF 进不来，所以信任它是安全的。
+    # 只有一种情况要改 false：8080 绕过 nginx 直接暴露到公网。
+    trust-proxy: ${RAG_TRUST_PROXY:true}
+    # 归属地补全任务间隔（毫秒）。默认 1 分钟一批 20 条
+    geo-delay-ms: ${RAG_GEO_DELAY_MS:60000}
+    geo-initial-delay-ms: ${RAG_GEO_INITIAL_DELAY_MS:20000}
+
+  # ---------- 个人站资料（主页展示，改这里重启生效，不用重新 build 前端） ----------
+  # 全部映射到 SiteProperties，about/links/tags 是列表结构
+  site:
+    # 站名：浏览器标题 + 页脚
+    title: ${RAG_SITE_TITLE:Demo Site}
+    # 站主名字：主页大标题「你好，我是 xxx」
+    owner: ${RAG_SITE_OWNER:Demo}
+    # 头像文字（没有头像图片时用首字母）
+    avatar-text: ${RAG_SITE_AVATAR:D}
+    # 一句话介绍，显示在名字下面
+    tagline: ${RAG_SITE_TAGLINE:记录、思考与分享}
+    # 「关于我」第一段
+    intro: ${RAG_SITE_INTRO:}
+    # 技能/兴趣标签
+    tags:
+      - ${RAG_SITE_TAG_1:Java}
+      - ${RAG_SITE_TAG_2:Spring Boot}
+      - ${RAG_SITE_TAG_3:知识库}
+    # 「关于我」的更多段落（每行一段）
+    about: []
+    # 外链（GitHub / 邮箱 / 博客等），格式 [{label, url}]
+    links: []
+
+  # ---------- 管理员账号 ----------
+  # ⚠️ 密码是明文放配置里的。要么设文件权限 600，要么用环境变量 RAG_ADMIN_PASSWORD。
+  #    进 git 之前一定要清掉。启动时 AdminInitializer 会按这里的值对齐库里的密码。
+  admin:
+    username: ${RAG_ADMIN_USERNAME:demo}
+    # 显示名（主页/留言区里出现），留空就用 username
+    display-name: ${RAG_ADMIN_DISPLAY_NAME:}
+    password: ${RAG_ADMIN_PASSWORD:}
+
+  # ---------- 文件存储（照片墙 / 项目截图 / 简历） ----------
+  # type=local  存服务器磁盘，URL 形如 /media/photos/2026-10/xxx.jpg
+  # type=oss    存阿里云 OSS，URL 形如 https://bucket.oss-cn-hangzhou.aliyuncs.com/xxx
+  #
+  # ⚠️ 生产建议用 oss：2C2G 轻量机带宽通常 3-5Mbps，一张 3MB 照片要传 5 秒，
+  #    访客多了会互相拖慢整站。本地存储只适合「暂时没凭据」和本地开发。
+  storage:
+    type: ${RAG_STORAGE_TYPE:local}
+    # 本地存储目录（type=local 时生效），同时通过 /media/** 暴露
+    local-dir: ${RAG_STORAGE_DIR:./data/media}
+    oss:
+      # 区域节点，如 oss-cn-hangzhou.aliyuncs.com（不要带 https://）
+      endpoint: ${RAG_OSS_ENDPOINT:}
+      bucket: ${RAG_OSS_BUCKET:}
+      # ⚠️ 别用主账号 AccessKey。建 RAM 子账号，只给这个 bucket 的
+      #    oss:PutObject / oss:GetObject / oss:DeleteObject 权限
+      access-key-id: ${RAG_OSS_AK_ID:}
+      access-key-secret: ${RAG_OSS_AK_SECRET:}
+      # 公共访问域名。留空自动拼 https://{bucket}.{endpoint}
+      # 绑了自定义域名时填这里，如 https://cdn.example.com
+      public-base: ${RAG_OSS_PUBLIC_BASE:}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
+
+logging:
+  level:
+    root: INFO
+    com.example.kb: DEBUG
+    # 排查向量库问题时打开，能看到 PgVectorStore 的建表和 SQL
+    # org.springframework.ai.vectorstore: DEBUG

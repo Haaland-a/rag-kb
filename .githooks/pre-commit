@@ -1,0 +1,150 @@
+#!/bin/bash
+# ============================================================
+# pre-commit 钩子：拦住明文凭据
+# ============================================================
+# 为什么需要它：
+#   这个仓库曾经把服务器 root 密码、数据库密码写进过部署文档。
+#   靠「记得别写」是靠不住的 —— git 一旦提交，明文就永久留在对象库里，
+#   删文件只是删掉引用，对象还在，任何时候 git log 都能翻出来。
+#   所以设一道机械防线。
+#
+# 启用方式（每个克隆都要做一次）：
+#   git config core.hooksPath .githooks
+#
+# 误报怎么办：
+#   真需要提交形如 password=xxx 的示例文本，把值写成占位符
+#   （<你的密码> / $ENV_VAR / xxxx），钩子只拦「看起来像真值」的。
+#
+# 性能注意（三个都踩过，别退回去）：
+#   1. 不用 grep/sed/tr 等外部命令 —— 每次 fork 在 Windows 上要几毫秒，
+#      2.6 万行的 diff 乘上去就是几十秒。全部用 bash 内建。
+#   2. 每条正则前先做一次廉价的子串预筛（case 模式匹配）。
+#      正则引擎慢的是编译和回溯，子串匹配是线性的 memcmp，先筛掉 99% 的行。
+#   3. 内容扫描跳过构建产物。前端 bundle 是单行几 MB，逐行正则纯属自残。
+# ============================================================
+
+set -u
+
+# 只看这次要提交的内容（--cached），不看工作区
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+[ -z "$staged" ] && exit 0
+
+fail=0
+report() {
+    echo ""
+    echo "  ✗ $1"
+    echo "    $2"
+    fail=1
+}
+
+# ---------- 1. 敏感文件名，直接拦 ----------
+while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    case "$f" in
+        *.pem|*.key|*.p12|*.jks|*.keystore|*_rsa|*_ed25519|id_rsa*|id_ed25519*)
+            report "$f" "私钥/证书类文件不该入库" ;;
+        *.bak|*.bak[0-9]*|*.bak-*|*.orig|*.rej)
+            report "$f" "备份文件最容易带着旧密码，不该入库" ;;
+        application-prod*.yml|application-prod*.yaml|*/application-prod*.yml)
+            report "$f" "生产配置含数据库密码与 API key，不该入库" ;;
+        .env|.env.*|*/.env|*/.env.*)
+            report "$f" "环境变量文件含真实密钥，不该入库" ;;
+        *敏感信息*.csv|*secret*.csv|*credential*.csv)
+            report "$f" "敏感信息清单不该入库" ;;
+    esac
+done <<< "$staged"
+
+# ---------- 2. 挑出需要做「内容扫描」的文件 ----------
+# 排除构建产物、二进制、依赖锁文件。用数组存，避免文件名里的空格被拆词。
+scan_files=()
+while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    case "$f" in
+        src/main/resources/static/*|*/node_modules/*|*/dist/*|*/target/*) continue ;;
+        *.png|*.jpg|*.jpeg|*.gif|*.webp|*.ico|*.pdf|*.zip|*.gz|*.jar|*.woff|*.woff2|*.ttf) continue ;;
+        package-lock.json|*/package-lock.json|pnpm-lock.yaml|yarn.lock) continue ;;
+        *.min.js|*.min.css) continue ;;
+    esac
+    scan_files+=("$f")
+done <<< "$staged"
+
+diff_text=""
+if [ ${#scan_files[@]} -gt 0 ]; then
+    # 用 git diff --cached 而不是读文件：只检查新增行，历史遗留不重复报警。
+    diff_text=$(git diff --cached -U0 -- "${scan_files[@]}" 2>/dev/null || true)
+fi
+
+# 密码类只在这些「配置型」后缀里拦。
+# 代码里的 `password: form.password` / `this.password = password` 是变量引用不是凭据，
+# 对它报错只会训练用户养成 --no-verify 的习惯，那这道防线就废了。
+is_config_file() {
+    case "$1" in
+        *.yml|*.yaml|*.properties|*.conf|*.ini|*.toml|*.env|*.sh|*.ps1|*.cmd|*.bat|*.tf|*.cfg) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+cur_file=""
+while IFS= read -r line; do
+    case "$line" in
+        "+++ b/"*) cur_file="${line#+++ b/}"; continue ;;
+        "+") continue ;;
+        +*) content="${line#+}" ;;
+        *) continue ;;
+    esac
+
+    # 超长行基本是压缩过的产物，逐字符正则没有意义
+    [ ${#content} -gt 2000 ] && continue
+
+    # 占位符放行：值里含这些的都不算真凭据
+    case "$content" in
+        *'${'*|*'你的'*|*'换成'*|*xxxx*|*XXXX*|*placeholder*|*example*|*REDACTED*|*TODO*) continue ;;
+    esac
+
+    # 阿里云 AccessKey —— 任何文件都拦。先做子串预筛。
+    if [[ "$content" == *LTAI* ]] && [[ "$content" =~ LTAI[A-Za-z0-9]{12,} ]]; then
+        report "新增行含阿里云 AccessKey" "$content"
+    fi
+
+    # DashScope / OpenAI 风格的 sk- key —— 任何文件都拦
+    if [[ "$content" == *sk-* ]] && [[ "$content" =~ sk-[A-Za-z0-9]{24,} ]]; then
+        report "新增行含 API Key" "$content"
+    fi
+
+    # 私钥内容 —— 任何文件都拦
+    if [[ "$content" == *"PRIVATE KEY"* ]] && [[ "$content" =~ BEGIN\ (RSA\ |OPENSSH\ |EC\ |DSA\ )?PRIVATE\ KEY ]]; then
+        report "新增行含私钥内容" "$content"
+    fi
+
+    # 明文密码 —— 只在配置文件里拦，且要求值像「字面量」而不是变量引用。
+    # 先用 case 做子串预筛，不含这些词的行直接跳过，省掉正则编译。
+    if is_config_file "$cur_file"; then
+        case "$content" in
+            *password*|*passwd*|*pwd*|*secret*|*api_key*|*apikey*|*api-key*|*access_key*|*accesskey*|*access-key*)
+                # 形式一：引号包起来的字面量，password: "hunter2hunter2"
+                if [[ "$content" =~ (password|passwd|pwd|secret|api[_-]?key|access[_-]?key)[[:space:]]*[:=][[:space:]]*[\"\']([^\"\']{6,})[\"\'] ]]; then
+                    report "新增行含明文密码/密钥（$cur_file）" "$content"
+                # 形式二：裸值，PASSWORD=abcdef123 —— 值里不含 . ( ) / ，
+                # 那些是代码调用（form.password / getPassword()）而不是配置值
+                elif [[ "$content" =~ (password|passwd|pwd|secret|api[_-]?key|access[_-]?key)[[:space:]]*[:=][[:space:]]*[A-Za-z0-9_\!\@\#\%\^\&\*\+-]{6,}[[:space:]]*$ ]]; then
+                    report "新增行含明文密码/密钥（$cur_file）" "$content"
+                fi
+                ;;
+        esac
+    fi
+done <<< "$diff_text"
+
+if [ "$fail" -ne 0 ]; then
+    echo ""
+    echo "============================================================"
+    echo "  提交被拒绝：发现明文凭据或不该入库的文件"
+    echo "============================================================"
+    echo "  改法：把真实值换成占位符（\$ENV_VAR 或 <你的密码>），"
+    echo "        或者把这个文件加进 .gitignore。"
+    echo ""
+    echo "  如果确认是误报，用 git commit --no-verify 跳过（慎用）。"
+    echo "============================================================"
+    exit 1
+fi
+
+exit 0
