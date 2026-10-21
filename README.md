@@ -9,7 +9,7 @@
 ![首页](docs/screenshots/home.png)
 
 **技术栈**：Spring Boot 3.5 + Spring AI 1.1 + PostgreSQL 16 + pgvector + Vue 3 + Element Plus。
-**规模**：单机 2 核 2G / 180 个文件 / 无前端独立服务 / 无 Redis / 无消息队列。
+**规模**：单机 2 核 2G / 183 个文件 / 无前端独立服务 / 无 Redis / 无消息队列。
 
 **部署形态**：一台 2 核 2G 的云服务器，JDK 17 + PostgreSQL 16（pgvector）+ nginx 反代，
 全部跑在一台机器上，实测常驻内存约 900MB。
