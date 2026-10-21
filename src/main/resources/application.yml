@@ -102,6 +102,64 @@ rag:
     # 换成不认 enable_thinking 的服务商（纯 OpenAI）时改成 false，否则可能 400
     disable-thinking: ${RAG_DISABLE_THINKING:true}
 
+    # ---------- 模型池：轮转 + 额度耗尽自动切换 ----------
+    # 百炼的免费额度是「按模型分别给」的（每个 1M tokens），所以一个用完
+    # 换另一个是真能救场的 —— 池子多大，可用额度就乘几倍。
+    #
+    # ⚠️ 顺序不是「优先级」，是第一轮的起点。之后按轮转均摊，这样 N 个模型
+    #    的额度同步消耗，可用时长直接乘 N。如果永远打第一个，等于把「每天
+    #    挂一次」变成「每小时挂一次」。
+    #
+    # 排序原则：快的、稳的在前，大模型居中，强制开思考的两个压队尾
+    # （它们每次要多花十几秒，只在前面全挂时才轮到）。
+    #
+    # 2026-10-21 在服务器 curl 实测（带 enable_thinking:false，max_tokens=16）：
+    #   200 → qwen3.8-flash / qwen3.7-flash / qwen3.7-flash-2026-07-15 /
+    #          deepseek-v4.1-flash / deepseek-v4.1-flash-1017 / qwen3.8-27b /
+    #          kimi-k3 / qwen3.8-max-0902 / deepseek-v4-flash-0731 /
+    #          qwen3.8-max / deepseek-v4-pro-0813 / qwen3.8-omni-flash
+    #   400 → qwen3.8-2.4t-a95b、glm-5.3
+    #          "The value of the enable_thinking parameter is restricted to True"
+    #          → 标 supports-disable-thinking: false，不传这个参数
+    #   排除 → qwen-mt-uni（翻译模型，要 input.target_lang，不是聊天模型）
+    #
+    # 换成别的服务商时，把模型名换成那家的即可；留空则退回单模型
+    # （用 spring.ai.openai.chat.options.model 指定的那个）。
+    pool:
+      models:
+        - name: qwen3.8-flash
+        - name: qwen3.7-flash
+        - name: qwen3.7-flash-2026-07-15
+        - name: deepseek-v4.1-flash
+        - name: deepseek-v4.1-flash-1017
+        - name: qwen3.8-27b
+        - name: kimi-k3
+        - name: qwen3.8-max-0902
+        - name: deepseek-v4-flash-0731
+        - name: qwen3.8-max
+        - name: deepseek-v4-pro-0813
+        - name: qwen3.8-omni-flash
+        # 下面两个只接受 enable_thinking:true，传 false 直接 400
+        - name: glm-5.3
+          supports-disable-thinking: false
+        - name: qwen3.8-2.4t-a95b
+          supports-disable-thinking: false
+
+      # 额度耗尽（403 AllocationQuota）冷却 6 小时。免费额度按月刷新，
+      # 探太勤白烧请求；真回血了由下面的 probe 任务探出来
+      quota-cooldown-seconds: ${RAG_POOL_QUOTA_COOLDOWN:21600}
+      # 一般错误（5xx / 超时 / 解析失败）冷却 5 分钟
+      error-cooldown-seconds: ${RAG_POOL_ERROR_COOLDOWN:300}
+      # 限流（429）冷却 60 秒，这种通常很快恢复
+      rate-limit-cooldown-seconds: ${RAG_POOL_RATE_COOLDOWN:60}
+
+      # 后台每 5 分钟把冷却到期的模型用 1 个 token 试活，通了才回池。
+      # 不这么做的话，额度真用完的模型 6 小时后照样被塞回去，用户白踩一次 403
+      probe-enabled: ${RAG_POOL_PROBE_ENABLED:true}
+      probe-delay-seconds: ${RAG_POOL_PROBE_DELAY:300}
+      probe-initial-delay-seconds: ${RAG_POOL_PROBE_INITIAL:120}
+      probe-max-tokens: ${RAG_POOL_PROBE_MAX_TOKENS:1}
+
   # ---------- 按 IP 限流 ----------
   rate-limit:
     # 每个 IP 每小时能问几次。站主不受限

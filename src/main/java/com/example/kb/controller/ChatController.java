@@ -15,6 +15,7 @@ import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -22,6 +23,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Flux;
 
 import java.util.List;
@@ -111,7 +113,6 @@ public class ChatController {
 
         ChatDoneEvent done = new ChatDoneEvent();
         done.setSourceCount(sources.size());
-        done.setElapsedMs(System.currentTimeMillis() - start);
         // 剩余配额给前端展示，让访客心里有数，而不是突然被拒
         done.setRemainingQuota(chatService.remainingQuota(ip, isAdmin));
 
@@ -121,9 +122,12 @@ public class ChatController {
                 .data(sources)
                 .build());
 
-        Flux<ServerSentEvent<Object>> tokens = chatService.streamAnswer(request.getQuestion(), context)
+        ChatService.AnswerStream answer = chatService.streamAnswer(request.getQuestion(), context);
+        String[] answerModel = new String[1];
+        Flux<ServerSentEvent<Object>> tokens = answer.tokens()
                 // 边发边累计，不发完再拼 —— 累计不碰数据库，成本只有一次 append
                 .doOnNext(token -> chatLogService.append(logId, token))
+                .doOnSubscribe(s -> answerModel[0] = answer.model())
                 .map(token -> ServerSentEvent.builder()
                         .event("token")
                         .data(token)
@@ -131,10 +135,16 @@ public class ChatController {
                 // token 可能是 null（某些模型在结束帧发空），过滤掉避免前端多渲染空串
                 .filter(Objects::nonNull);
 
-        Flux<ServerSentEvent<Object>> tail = Flux.just(ServerSentEvent.builder()
-                .event("done")
-                .data(done)
-                .build());
+        // ⚠️ 用 defer：done 帧必须在流跑完之后才构造，
+        // 否则 elapsedMs 永远是建连耗时、model 永远是 null
+        Flux<ServerSentEvent<Object>> tail = Flux.defer(() -> {
+            done.setElapsedMs(System.currentTimeMillis() - start);
+            done.setModel(answerModel[0]);
+            return Flux.just(ServerSentEvent.builder()
+                    .event("done")
+                    .data(done)
+                    .build());
+        });
 
         // ⚠️ doFinally 而不是 doOnComplete：访客关掉页面时 Flux 被取消，
         // 只有 doFinally 保证跑得到。complete 标志据此区分「答完了」和「中途走了」
@@ -155,5 +165,19 @@ public class ChatController {
         boolean isAdmin = Boolean.TRUE.equals(httpRequest.getAttribute("authenticated"));
         ChatQuota quota = chatService.quotaOf(ip, isAdmin);
         return R.ok(quota);
+    }
+
+    /**
+     * 模型池状态（站主）。
+     *
+     * <p>为什么要暴露这个：额度是按模型分别给的，站主需要知道「现在还有几个
+     * 模型能用」「哪个进了冷却」。否则访客说「网站答不出来」时，站主只能翻日志。</p>
+     */
+    @GetMapping("/models")
+    public R models(HttpServletRequest httpRequest) {
+        if (!Boolean.TRUE.equals(httpRequest.getAttribute("authenticated"))) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "需要先登录");
+        }
+        return R.ok(chatService.modelPoolStatus());
     }
 }

@@ -78,6 +78,9 @@
                   <span v-if="src.pageNumber" class="cw-source-meta">p{{ src.pageNumber }}</span>
                 </div>
               </div>
+
+              <!-- 哪个模型答的。模型池会轮转，出问题时这点信息很关键 -->
+              <div v-if="msg.model" class="cw-model">{{ msg.model }}</div>
             </div>
           </div>
 
@@ -179,7 +182,7 @@ function ask(preset) {
   resetInputHeight()
   messages.value.push({ role: 'user', content: text })
 
-  const botMsg = reactive({ role: 'assistant', content: '', sources: [] })
+  const botMsg = reactive({ role: 'assistant', content: '', sources: [], model: '' })
   messages.value.push(botMsg)
   streaming.value = true
   scrollToBottom()
@@ -202,6 +205,10 @@ function ask(preset) {
         if (typeof done?.remainingQuota === 'number' && done.remainingQuota >= 0) {
           // 服务端回传的额度比前端自己算的准
           props.quota.remaining = done.remainingQuota
+        }
+        // 模型池切换过模型时把最终用到的模型挂上去，让人知道是谁答的
+        if (done?.model) {
+          botMsg.model = done.model
         }
       },
       onError: (msg) => {
@@ -472,6 +479,13 @@ function escapeHtml(s) {
   font-size: 10.5px;
   padding: 0 2px;
   cursor: help;
+}
+.cw-model {
+  margin-top: 8px;
+  font-size: 10.5px;
+  color: #b0b8c4;
+  text-align: right;
+  letter-spacing: .2px;
 }
 .cw-sources {
   margin-top: 8px;

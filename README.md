@@ -229,6 +229,9 @@ rag:
 | `qwen3.8-27b` / `qwen3.8-max-0902` / `kimi-k3` | 200 | 有额度 |
 | `qwen3.7-plus` | 403 | `AllocationQuota.FreeTierOnly`，不在免费清单 |
 
+额度是**按模型分别给**的（每个 1M tokens），所以配了模型池：14 个模型轮转分担，
+某个额度耗尽（403）自动切下一个，用户无感。细节见 [六、5](#5-为什么做模型池而不是单模型)。
+
 ---
 
 ## 三、快速开始
@@ -358,7 +361,8 @@ kb_moment（日常动态）──1:N──▶ kb_comment（留言，moment_id �
 | --- | --- | --- | --- |
 | GET | `/api/site` | 公开 | 主页信息（站名 + 站主资料 + 文档/片段/访客数 + 最近收录 + **照片/项目/下载** + 当前 IP 配额） |
 | GET | `/api/chat/quota` | 公开 | 当前 IP 剩余问答次数 |
-| POST | `/api/chat` | 公开 | SSE 流式问答（**有 IP 限流**） |
+| POST | `/api/chat` | 公开 | SSE 流式问答（**有 IP 限流**；失败自动换模型，done 帧带 `model`） |
+| GET | `/api/chat/models` | 站主 | 模型池状态（每个模型是否可用 / 冷却剩余秒数 / 最近失败原因） |
 | GET | `/api/media/public/photos` | 公开 | 照片墙（只含 visible=true） |
 | GET | `/api/media/public/projects` | 公开 | 项目展示（只含 visible=true） |
 | GET | `/api/media/public/downloads` | 公开 | 下载列表（只含 visible=true） |
@@ -428,10 +432,15 @@ event: token
 data: 回答片段
 
 event: done
-data: {"sourceCount":1,"chatTokens":0,"elapsedMs":413,"remainingQuota":19}
+data: {"sourceCount":1,"chatTokens":0,"elapsedMs":413,"remainingQuota":19,
+       "model":"qwen3.8-flash"}
 ```
 
 `chatTokens` 恒为 0：百炼的 stream 模式不返回 usage（每帧 `usage: null`）。
+
+`model` 是**实际答出这句话**的模型 —— 模型池会轮转，中途换过模型时前端可以显示
+「由 xxx 回答」。⚠️ 它只在流跑完后才有值，所以后端是放在 `Flux.defer(...)` 里
+填的：不 defer 的话 `elapsedMs` 永远只是建连耗时、`model` 永远是 null。
 
 ---
 
@@ -471,7 +480,50 @@ qwen3.x / deepseek-v4.1 默认是推理模型：先吐几十段 `reasoning_conte
 实现方式是 `OpenAiChatOptions.extraBody(Map.of("enable_thinking", false))` ——
 这个 map 上有 `@JsonAnyGetter`，会被扁平化写进请求体顶层。
 
-### 5. 为什么前端不打成独立服务
+### 5. 为什么做模型池而不是单模型
+
+百炼的免费额度是**按模型分别给**的（每个模型 1M tokens）。单模型意味着这个模型
+用光了整站就答不了话；池化之后可用额度直接乘 N，而且失败时能自动换。
+
+**轮转而不是固定优先**：如果永远先打第一个，第一个模型的额度会被迅速打光，
+等于把「每天挂一次」变成「每小时挂一次」。轮转让 N 个模型的额度同步消耗，
+可用时长直接乘 N。也不用「按剩余额度加权」—— 百炼没有查剩余额度的公开 API，
+爬控制台 HTML 太脆。
+
+**最关键的约束：已经吐字之后不能换模型。** 前端看到的是逐 token 追加的文本，
+换模型等于把两段不同风格的答案拼在一起，中间还断一下。所以：
+
+| 失败时机 | 处理 | 用户感受 |
+| --- | --- | --- |
+| 还没吐第一个 token | 静默换下一个模型 | 完全无感 |
+| 已经吐了一半 | 报错给前端 | 「回答中断」 |
+
+能真的救场正是因为额度耗尽（403）和限流（429）都发生在**建连阶段**，
+此时一个 token 都还没发出去。
+
+失败分三类冷却，时长差两个数量级：
+
+| 类型 | 判定依据 | 冷却 | 理由 |
+| --- | --- | --- | --- |
+| 额度耗尽 | `AllocationQuota` / `FreeTierOnly` / `insufficient_quota` | 6 小时 | 免费额度按月刷新，探太勤白烧请求 |
+| 限流 | `429` / `rate limit` | 60 秒 | 通常是瞬时拥塞 |
+| 其它 | 5xx / 超时 / 解析失败 | 5 分钟 | 多数是抖动 |
+
+⚠️ 分类靠**字符串匹配**而不是异常类型：Spring AI 把 4xx 统一包成
+`NonTransientAiException`，报文才是唯一能区分「额度没了」和「模型名写错了」的东西。
+
+**冷却到期不等于恢复。** 后台每 5 分钟把冷却到期的模型用 1 个 token 试活
+（`maxTokens(1)`），通了才放回池子 —— 否则额度真用完的模型 6 小时后照样被塞回去，
+等于让某个用户白踩一次 403。
+
+`OpenAiChatModel` 内部的 `RetryTemplate` 特意设成 `maxAttempts(1)`：切换模型的
+决策在 `ChatService` 里做，这里再重试 3 次只会把「一个坏模型」放大成
+「三倍等待时间」—— 用户看到的是转圈更久，而不是换个模型答出来。
+
+配置在 `application.yml` 的 `rag.chat.pool`，站主可在 `GET /api/chat/models`
+看到每个模型当前是否可用、冷却还剩几秒、最近一次失败原因。
+
+### 6. 为什么前端不打成独立服务
 
 部署时 `rag-kb-ui/dist` 拷进 `src/main/resources/static/`，由 Spring Boot 托管。
 代价是改前端要重新 build + 打包 jar。
@@ -483,12 +535,12 @@ qwen3.x / deepseek-v4.1 默认是推理模型：先吐几十段 `reasoning_conte
 证书改由 nginx 持有后，续期只要 `nginx -s reload`，Java 进程不动。
 nginx 实测常驻约 8MB —— 8MB 换掉"每 4 天重启一次站点"，这笔账划算。
 
-### 6. 为什么限流用滑动窗口
+### 7. 为什么限流用滑动窗口
 
 固定窗口（每分钟清零）有边界突刺：23:59 打 20 次 + 00:00 打 20 次 = 40 次集中在一分钟。
 滑动窗口按「最近 3600 秒内有多少次」算，没有这个洞。
 
-### 7. 为什么问答做成悬浮窗而不是独立页面
+### 8. 为什么问答做成悬浮窗而不是独立页面
 
 需求是「**个人网站**，其次才是 RAG」。原来整页一个大聊天框，主次颠倒了 ——
 访客进来第一眼应该看到「这是谁」，而不是一个聊天界面。
@@ -499,7 +551,7 @@ nginx 实测常驻约 8MB —— 8MB 换掉"每 4 天重启一次站点"，这�
 - 浮窗可以出现在任何页面（后台也能用），不受路由限制
 - 移动端浮窗自动变全屏
 
-### 8. 为什么「关于我」默认读配置、改过就读数据库
+### 9. 为什么「关于我」默认读配置、改过就读数据库
 
 `rag.site.*` 绑到 `SiteProperties`，改名/改简介只改 yml 重启，**不用重新 build 前端**。
 后来又加了「后台在线编辑」，于是变成两级：
@@ -516,7 +568,7 @@ nginx 实测常驻约 8MB —— 8MB 换掉"每 4 天重启一次站点"，这�
 「关于我」整行读、整行写，`about`/`links`/`tags` 存 JSONB —— 它们只是展示用的有序列表，
 不需要按段落查询。拆成子表会把「保存一次」变成三条 DELETE + N 条 INSERT。
 
-### 9. 为什么留言的可见性规则不放在 Controller
+### 10. 为什么留言的可见性规则不放在 Controller
 
 需求演进过一次：最初是「访客留言只有站主能看到」，后来变成「用户可自行选择是否公开，
 站主可屏蔽，匿名留言不保存记录」。规则变复杂后，**最容易出错的地方是把可见性判断
@@ -548,7 +600,7 @@ AND (visibility = 'PUBLIC' AND status = 'VISIBLE'
    `displayName` 覆盖 —— 否则任何人都能顶着别人的名字发言
 2. **访客接口不返回 IP**：公开别人的 IP 是隐私问题。IP 只在站主后台的留言列表里出现
 
-### 10. 为什么「匿名留言不保存记录」最后还是存了库
+### 11. 为什么「匿名留言不保存记录」最后还是存了库
 
 需求原话是「匿名留言不会保存记录」。但完全不写库的话，站主在后台就永远看不到这条
 留言 —— 那留言本身就没有意义了（留言的目的就是让站主看到）。
@@ -558,7 +610,7 @@ AND (visibility = 'PUBLIC' AND status = 'VISIBLE'
 
 换句话说，「不保存记录」被解读成「不给你留后路」，而不是「站主看不见」。
 
-### 11. 为什么注册门槛用设备指纹 + IP 双软限
+### 12. 为什么注册门槛用设备指纹 + IP 双软限
 
 需求是「同一设备不能注册多账号」。严格做需要硬件级设备识别，浏览器做不到。
 可选项：
@@ -583,7 +635,7 @@ CREATE UNIQUE INDEX uk_kb_user_device ON kb_user (device_id) WHERE device_id IS 
 **真正的兜底是「注册了也只能留言」**：普通用户没有站主权限，所有管理接口返回 403。
 注册多个账号除了刷留言没有别的作用，而刷留言有 IP 限流。
 
-### 12. 为什么开放注册后必须停用「清理非管理员账号」
+### 13. 为什么开放注册后必须停用「清理非管理员账号」
 
 原来的 `AdminInitializer` 每次启动都执行 `DELETE FROM kb_user WHERE username <> '<管理员账号>'`
 —— 单用户时代这是对的，能防止有人手工往库里塞账号。开放注册后它会**把所有注册用户删光**，
@@ -592,7 +644,7 @@ CREATE UNIQUE INDEX uk_kb_user_device ON kb_user (device_id) WHERE device_id IS 
 已停用该调用（方法体保留并标 `@Deprecated`，将来回单用户模式改一行调用即恢复）。
 用户隔离改由「路径白名单 + `requireAdmin()`」保证 —— 这个机制不依赖数据库里有几个用户。
 
-### 13. 为什么留言表不再拆「留言板」和「动态评论」两张表
+### 14. 为什么留言表不再拆「留言板」和「动态评论」两张表
 
 最初是 `kb_moment_comment` 一张表专管动态评论。后来需求加了独立留言板，
 两个选择：再建一张 `kb_comment_board`，或者给现有表加可空的 `moment_id`。
@@ -602,7 +654,7 @@ CREATE UNIQUE INDEX uk_kb_user_device ON kb_user (device_id) WHERE device_id IS 
 两套测试**。后者是持续的、每个新功能都要付一次的代价，前者是一次性写清楚的。
 动态评论总数很少（个人站，几百条量级），拆表带来的查询优化收益接近零。
 
-### 14. 为什么存储抽象成 FileStorage 接口
+### 15. 为什么存储抽象成 FileStorage 接口
 
 照片和简历是「用户产生的文件」，和文档（走 RAG 管线）不是一类东西。
 写成 `FileStorage` 接口（`put` / `delete` / `keyOf`），实现有 `LocalStorage` 和 `OssStorage`，
@@ -617,7 +669,7 @@ CREATE UNIQUE INDEX uk_kb_user_device ON kb_user (device_id) WHERE device_id IS 
 Spring 报 `required a single bean, but 2 were found` 启动直接失败。
 **同一个接口的实现要么全用组件扫描、要么全用 @Bean 手工装配，不能混。**
 
-### 15. 为什么照片/项目/下载都塞进 /api/site
+### 16. 为什么照片/项目/下载都塞进 /api/site
 
 主页首屏一次请求拿全，少 3 个 RTT。手机 4G 下每次 RTT 30-80ms，
 4 个串行请求就是多 100-240ms 白屏；而且分开拿会出现「照片出来了但项目还没来」的跳动。
@@ -636,7 +688,7 @@ rag-kb/                                  # 仓库根：前后端同一个 git �
 ├── src/main/java/com/example/kb/        # 后端
 │   ├── controller/                      # 8 个：Document / Chat / Auth / Visit / Site / SiteContent / Media / Comment
 │   │   └── 只做「收参数 → 调 Service → 包 R」，不碰 SQL、不拼业务、不返回实体
-│   ├── service/                         # 12 个：文档、索引、问答、检索、引用、认证、访客、站点、内容、资料、动态、留言
+│   ├── service/                         # 13 个：文档、索引、问答、检索、引用、认证、访客、站点、内容、资料、动态、留言、模型池
 │   │   └── 流程编排 + 业务规则（限流策略、分页上限、容错口径都在这里）
 │   ├── repository/                      # 10 个：文档/切块/用户/访客/资料/动态/留言/照片/项目/下载，只写 SQL
 │   ├── domain/                          # 10 个实体
@@ -651,7 +703,8 @@ rag-kb/                                  # 仓库根：前后端同一个 git �
 │   │   ├── ratelimit/                   # IpRateLimiter（滑动窗口）
 │   │   └── storage/                     # FileStorage + LocalStorage + OssStorage
 │   ├── config/                          # AiConfig / AsyncConfig / WebConfig / StorageConfig
-│   │   └── AuthInterceptor / AdminInitializer / SiteProperties
+│   │   ├── AuthInterceptor / AdminInitializer / SiteProperties
+│   │   └── ChatPoolProperties           # 模型池的 rag.chat.pool 绑定
 │   └── common/                          # R 统一响应 + 全局异常
 ├── src/main/resources/
 │   ├── application.yml
@@ -767,7 +820,9 @@ rag-kb/                                  # 仓库根：前后端同一个 git �
 | `http://IP:8080` 打不开（正常） | 应用已改成 `server.address: 127.0.0.1`，8080 只对本机开放，一律走 `https://IP/` |
 | 主页空白 | `curl http://127.0.0.1:8080/`（服务器上）是否有 index.html；jar 内 `BOOT-INF/classes/static/` 是否有文件 |
 | 问答 500 | `app.log` 搜 `WebClientResponseException` |
-| 问答 403 | 模型是否在免费清单；换 `qwen3.7-flash` |
+| 问答 403 | 该模型的免费额度用光了。查 `GET /api/chat/models` 看是不是整个池子都冷却了；单个模型 403 已由模型池自动切换兜住 |
+| 所有模型都说不可用 | `/api/chat/models` 看是不是全部冷却；`qwen3.7-flash` 系列 2026-10-23 到期，到期后要从池子里删 |
+| 回答一半断了 | 是模型中途失败。已吐字之后**故意不切换**（换模型会把两段不同风格答案拼起来），只能重问 |
 | 问答 429 | 该 IP 触发限流，等一小时或调 `rag.rate-limit.chat-per-hour` |
 | 归属地一直「查询中」 | 检查 `geo_status` 是否为 FAILED（内网 IP 会直接失败，正常） |
 | 上传后一直 PENDING | 搜 `IndexingService` 日志找异常；`@Async` 异常不传播，靠日志 |

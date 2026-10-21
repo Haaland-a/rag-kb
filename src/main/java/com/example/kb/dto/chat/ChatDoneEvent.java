@@ -18,6 +18,8 @@ public class ChatDoneEvent {
     private long elapsedMs;
     /** 该 IP 本小时剩余问答次数；-1 = 不限（站主） */
     private int remainingQuota;
+    /** 实际答出这句话的模型。切换过模型时前端可以显示「由 xxx 回答」 */
+    private String model;
 
     public int getSourceCount() {
         return sourceCount;
@@ -49,5 +51,13 @@ public class ChatDoneEvent {
 
     public void setRemainingQuota(int remainingQuota) {
         this.remainingQuota = remainingQuota;
+    }
+
+    public String getModel() {
+        return model;
+    }
+
+    public void setModel(String model) {
+        this.model = model;
     }
 }
