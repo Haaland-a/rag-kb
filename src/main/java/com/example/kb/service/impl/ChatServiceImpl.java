@@ -216,7 +216,7 @@ public class ChatServiceImpl implements IChatService {
     }
 
     private static final String SYSTEM_PROMPT = """
-            你是「Haalan 的知识库」问答助手。严格遵守：
+            你是「个人知识库」问答助手。严格遵守：
             1. 只能依据下方「资料」内容回答，不得使用你自己的知识补充。
             2. 资料中没有的信息，明确回答「资料中未提及」，不要猜测。
             3. 回答引用资料时，在对应句子末尾用 [编号] 标注，编号与资料片段序号一致。

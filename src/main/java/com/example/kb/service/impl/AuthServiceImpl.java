@@ -119,8 +119,8 @@ public class AuthServiceImpl implements IAuthService {
             throw new IllegalArgumentException("密码太长了");
         }
 
-        // ⚠️ 站主用户名不可注册。否则有人抢注 haaland，
-        // 虽然登录不进去（密码不同），但界面上会显示成两个 haaland，能骗到访客
+        // ⚠️ 站主用户名不可注册。否则有人抢注站主用户名，
+        // 虽然登录不进去（密码不同），但界面上会显示成两个同名账号，能骗到访客
         if (name.equalsIgnoreCase(adminUsername)) {
             throw new IllegalStateException("这个名字被站主保留了，换一个吧");
         }

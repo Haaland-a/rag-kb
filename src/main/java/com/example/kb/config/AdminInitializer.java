@@ -15,9 +15,9 @@ import org.springframework.stereotype.Component;
  * <p>需求是「只有我一个用户是真正的管理员，没有别的用户」。所以这里的策略不是
  * 「有用户就不管」，而是<b>强制对齐</b>：</p>
  * <ol>
- *   <li>库里没有 haaland → 建一个，密码取配置</li>
- *   <li>库里有 haaland 但密码对不上配置 → 改成配置的密码</li>
- *   <li>删掉除 haaland 以外的所有用户（保证「没有别的用户」）</li>
+ *   <li>库里没有管理员账号 → 建一个，密码取配置</li>
+ *   <li>库里有管理员账号但密码对不上配置 → 改成配置的密码</li>
+ *   <li>删掉除管理员以外的所有用户（保证「没有别的用户」）</li>
  * </ol>
  *
  * <p>⚠️ 第 2 条是把<b>配置文件当唯一事实源</b>。好处是改密码不用进服务器跑 SQL，
@@ -36,7 +36,7 @@ public class AdminInitializer implements ApplicationRunner {
     private final KbUserMapper userMapper;
     private final PasswordHasher passwordHasher;
 
-    /** 管理员账号，默认 haaland（需求指定） */
+    /** 管理员账号，默认 demo */
     private final String adminUsername;
 
     /** 管理员初始密码。默认空串，必须由配置或环境变量 RAG_ADMIN_PASSWORD 提供 */
