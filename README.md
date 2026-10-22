@@ -6,32 +6,22 @@
 访客可以匿名留言，也可以注册一个账号（一个浏览器只能注册一个）—— 注册后留言可以选
 「公开」还是「只给站主看的悄悄话」，并且能编辑/删除自己发过的留言。
 
-![首页](docs/screenshots/home.png)
-
-**技术栈**：Spring Boot 3.5 + Spring AI 1.1 + PostgreSQL 16 + pgvector + Vue 3 + Element Plus。
-**规模**：单机 2 核 2G / 183 个文件 / 无前端独立服务 / 无 Redis / 无消息队列。
-
-**部署形态**：一台 2 核 2G 的云服务器，JDK 17 + PostgreSQL 16（pgvector）+ nginx 反代，
-全部跑在一台机器上，实测常驻内存约 900MB。
+**线上地址**：https://<你的服务器公网IP>/ （2 核 2G 云服务器，CentOS 8）
 裸 IP 没有域名，所以用的是 Let's Encrypt 的 **IP 证书**（160 小时有效期，cron 自动续期）。
 HTTP 80 自动 301 到 HTTPS。细节见 [deploy/https/README.md](deploy/https/README.md)。
-
-> 这个仓库是一个**可跑起来的完整项目**，不是脚手架：13 张表的 schema、6 个增量迁移脚本、
-> 一整套前后端、部署到一台 2C2G 云服务器的脚本都在里面。
-> 想直接跑起来看效果，跳到 [三、快速开始](#三快速开始)；想先看设计取舍，看 [六、关键设计取舍](#六关键设计取舍)。
 
 ---
 
 ## 一、这个站是什么
 
-**先是一个个人网站，其次才是 RAG。** 首页不是聊天框 —— 首屏是「你好，我是 XXX」的
+**先是一个个人网站，其次才是 RAG。** 首页不是聊天框 —— 首屏是「你好，我是 Demo」的
 自我介绍页，问答只是页面右下角一个可以点开的小窗口。
 
 | 角色 | 能做什么 | 需要登录 |
 | --- | --- | --- |
 | **游客**（任何人） | 看个人主页（头像/简介/标签/外链/日常动态/照片墙/项目/下载）、点右下角小气泡提问、在留言板和动态下匿名留言 | 不需要 |
 | **注册用户** | 游客的全部能力，外加：留言可选「公开」或「悄悄话」，可以编辑/删除自己的留言 | 需要（`/register` 注册） |
-| **站主**（只有一个账号） | 上传/删除文档、重建索引、看访客日志（IP/地点/时间/问了什么）、看问答记录、管理照片墙/项目/简历、编辑「关于我」、发日常动态、管理全部留言（可屏蔽） | 需要 |
+| **站主**（仅 `demo`） | 上传/删除文档、重建索引、看访客日志（IP/地点/时间/问了什么）、看问答记录、管理照片墙/项目/简历、编辑「关于我」、发日常动态、管理全部留言（可屏蔽） | 需要 |
 
 访客不需要注册也能留言。系统记录其 **IP + 归属地 + 访问时间 + 问的问题**，站主在后台可见。
 按 IP 限流，默认每小时 20 次问答，防止单个访客刷光模型免费额度。站主不受限。
@@ -60,8 +50,8 @@ HTTP 80 自动 301 到 HTTPS。细节见 [deploy/https/README.md](deploy/https/R
 2. **同 IP 24 小时限 2 个** —— 挡「清缓存换指纹重来」。动态 IP / 校园网 NAT 会误伤，所以阈值宽松。
 3. **用户名唯一** —— 数据库约束。
 
-> ⚠️ **站主用户名（`rag.admin.username`，默认 `demo`）禁止注册**。否则有人抢注这个名字，虽然登录不进去（密码不同），
-> 但界面上会显示成两个同名账号，能骗到访客。
+> ⚠️ **站主用户名（`demo`）禁止注册**。否则有人抢注这个名字，虽然登录不进去（密码不同），
+> 但界面上会显示成两个 demo，能骗到访客。
 >
 > ⚠️ 真正的兜底是「注册了也只能留言」—— 普通用户没有站主权限，
 > 所有 `/api/documents`、`/api/visits`、`/api/comments`（管理端）接口都会 403。
@@ -86,6 +76,7 @@ HTTP 80 自动 301 到 HTTPS。细节见 [deploy/https/README.md](deploy/https/R
 | `/admin/comments` | 留言管理：含悄悄话与已屏蔽，可筛选未读/类型，可屏蔽 | 站主 |
 | `/admin/profile` | 关于我：在线编辑简介/段落/外链/标签/头像 | 站主 |
 | `/admin/chats` | 问答记录：访客问了什么、回答了什么、引用了几条 | 站主 |
+| `/admin/users` | 注册用户：谁注册了、什么时候、上次登录、注册 IP | 站主 |
 | `/admin/visits` | 访客记录：按 IP 聚合 / 原始流水 | 站主 |
 
 > **登录入口在哪**：不需要登录也能看完整站（主页、日常、留言板、问答浮窗都开放），
@@ -103,6 +94,14 @@ HTTP 80 自动 301 到 HTTPS。细节见 [deploy/https/README.md](deploy/https/R
 
 访客在 `/moments` 页或主页「最近的日常」区块下能看到动态，并可以在每条下面留言；
 也可以去独立的 `/board` 留言板留言（不挂在某条动态下）。
+
+**主页只摊开前 3 条公开留言**，点动态卡片（或底部「N 条留言 →」）进
+`/moments/:id` 看全部。这个「3」是 `MomentService.HOME_PREVIEW_LIMIT`：
+主页是扫一眼的地方，一条动态下面挂 30 条会把后面的项目/照片区推到几屏以外。
+
+> ⚠️ 主页的留言预览**恒按访客视角**返回 —— 站主自己打开主页也看不到悄悄话，
+> 那是后台留言管理的事。而「自己发的被屏蔽留言仍可见」这条规则依然生效，
+> 所以带 token 访问 `/api/site` 时，预览里会包含自己被屏蔽的那几条（标记 `hidden`）。
 
 留言的可见性按身份分（详见上面「三种身份与留言可见性」）：
 
@@ -169,7 +168,8 @@ rag:
       public-base: ""    # 留空自动拼 https://{bucket}.{endpoint}
 ```
 
-**建议生产用 oss**：2C2G 轻量机带宽通常只有 3-5Mbps，一张 3MB 的手机照要传 5 秒，访客多了会互相拖慢整站。本地存储只适合「还没申请 OSS」和本地开发。
+**建议生产用 oss**：2C2G 轻量机带宽通常只有 3-5Mbps，一张 3MB 的手机照要传 5 秒，
+访客多了会互相拖慢整站。本地存储只适合「还没申请 OSS」和本地开发。
 
 ⚠️ OSS 凭据四项缺一个，启动时直接报错退出（`rag.storage.type=oss 但凭据不全`），
 不会带病运行。AccessKey 建议用 RAM 子账号，只给这个 bucket 的
@@ -187,8 +187,8 @@ rag:
 ```yaml
 rag:
   site:
-    title: "Demo Site"                  # 浏览器标题 + 页脚
-    owner: "Demo"                       # 主页大标题「你好，我是 xxx」
+    title: "Demo Site"                # 浏览器标题 + 页脚
+    owner: "Demo"                     # 主页大标题「你好，我是 xxx」
     avatar-text: "D"                    # 头像文字（没上传头像图片时用首字母）
     tagline: "记录、思考与分享"          # 名字下面一句话
     intro: "第一段自我介绍"
@@ -214,6 +214,7 @@ rag:
 | 后端 | Spring Boot | 3.5.15 |
 | AI 框架 | Spring AI | 1.1.8 |
 | 数据库 | PostgreSQL + pgvector | 16 |
+| ORM | MyBatis-Plus（`mybatis-plus-spring-boot3-starter`）| 3.5.10.1 |
 | 前端 | Vue 3 + Element Plus + Pinia + Vite | 3.5 / 2.9 / 2.3 / 6.0 |
 | JDK | OpenJDK | 17 |
 | 大模型 | 阿里云百炼 `qwen3.7-flash` | OpenAI 兼容端点 |
@@ -221,23 +222,31 @@ rag:
 
 ### 免费额度可用的模型（实测）
 
+2026-10-21 在服务器上 curl 实测（带 `enable_thinking:false`，`max_tokens=16`），
+**14 个聊天模型可用**，全部配进了模型池（见 [六、5](#5-为什么做模型池而不是单模型)）：
+
 | 模型 | 状态 | 备注 |
 | --- | --- | --- |
-| `qwen3.7-flash` | 200 | 当前默认，响应最快（约 1.1s） |
-| `qwen3.8-flash` | 200 | 也可以用 |
+| `qwen3.8-flash` | 200 | 池子里排第一，响应约 1.1s |
+| `qwen3.7-flash` | 200 | 也很快（约 1.1s） |
+| `qwen3.7-flash-2026-07-15` | 200 | 同上，快照版 |
 | `deepseek-v4.1-flash` | 200 | 稍慢 |
-| `qwen3.8-27b` / `qwen3.8-max-0902` / `kimi-k3` | 200 | 有额度 |
+| `deepseek-v4.1-flash-1017` | 200 | 快照版，额度到期最晚（2027-01） |
+| `qwen3.8-27b` / `kimi-k3` / `qwen3.8-max-0902` | 200 | 有额度，响应偏慢 |
+| `deepseek-v4-flash-0731` / `qwen3.8-max` | 200 | 有额度 |
+| `deepseek-v4-pro-0813` / `qwen3.8-omni-flash` | 200 | 有额度 |
+| `glm-5.3` / `qwen3.8-2.4t-a95b` | 400（仅限思考开） | 传 `enable_thinking:false` 报 `restricted to True`；池里标 `supports-disable-thinking: false` |
+| `qwen-mt-uni` | 排除 | 是翻译模型，要 `input.target_lang`，不是聊天模型 |
 | `qwen3.7-plus` | 403 | `AllocationQuota.FreeTierOnly`，不在免费清单 |
 
-额度是**按模型分别给**的（每个 1M tokens），所以配了模型池：14 个模型轮转分担，
-某个额度耗尽（403）自动切下一个，用户无感。细节见 [六、5](#5-为什么做模型池而不是单模型)。
+⚠️ 额度是**按模型分别给**的（每个 1M tokens），所以才值得池化；
+`qwen3.7-flash` 与 `-2026-07-15` 这两个 2026-10-23 就到期，别再往里灌流量。
 
-⚠️ 有个坑只有真实请求才暴露：**`kimi-k3` 不接受 `temperature` 参数**，传 `temperature:0.2`
-直接回 `<400> InternalError.Algo.InvalidParameter: Parameter 'temperature'=0.2 is not supported
-for kimi-k3 model.`。池里给它标了 `supports-temperature: false`，构造 options 时不带这个字段。
-同理 `glm-5.3` 与 `qwen3.8-2.4t-a95b` 只接受 `enable_thinking:true`，标了
-`supports-disable-thinking: false`。这两个开关都只能靠上线后看 `GET /api/chat/models` 里
-对应模型的 `failCount` 才发现 —— 单测和启动检查都看不出来。
+⚠️ 2026-10-22 上线后又踩到一个只有真实请求才暴露的坑：**`kimi-k3` 不接受 `temperature` 参数**，
+传 `temperature:0.2` 直接回 `<400> InternalError.Algo.InvalidParameter: Parameter 'temperature'=0.2
+is not supported for kimi-k3 model.`。已在池里标 `supports-temperature: false`，构造 options 时不带这个字段。
+这类「不支持的参数直接 400」的模型，单测和启动检查都发现不了，只能靠上线后看
+`GET /api/chat/models` 里对应模型的 `failCount`。
 
 ---
 
@@ -303,16 +312,16 @@ java -Xms256m -Xmx512m -XX:MaxMetaspaceSize=160m -XX:MaxDirectMemorySize=64m \
 
 ```bash
 # 前端开发（独立跑，proxy 到后端 8080）
-# 前端源码在 rag-kb-ui/，和后端同一个仓库（源码入库，node_modules 与 dist 不入库）
+# ⚠️ 前端源码在 rag-kb/rag-kb-ui/，和后端同一个仓库
 cd rag-kb-ui && npm install && npm run dev
 ```
 
-访问 http://localhost:8080 （前端开发模式是 http://localhost:5173，Vite 会把 /api 代理到 8080）
+访问 http://localhost:8080
 
 > 本地开发是纯 HTTP（没证书），HTTPS 只在线上那台机器上由 nginx 终结。
-> 所以 `application.yml` 里没有任何 `server.ssl.*`。`server.address` 默认 `127.0.0.1`
-> （可用环境变量 `SERVER_ADDRESS` 覆盖）—— 本地跑同样只监听回环，`http://localhost:8080` 正常访问，
-> 但同一局域网的其他设备连不上。想让手机连本机调试就 `export SERVER_ADDRESS=0.0.0.0`。
+> 所以 `application.yml` 里没有任何 `server.ssl.*`，`server.address: 127.0.0.1`
+> 也只影响线上 —— 本地跑的时候同样只监听回环，`http://localhost:8080` 正常访问，
+> 但同一局域网的其他设备连不上（本来也不需要）。
 
 ---
 
@@ -384,6 +393,7 @@ kb_moment（日常动态）──1:N──▶ kb_comment（留言，moment_id �
 | POST | `/api/auth/register` | 公开 | 注册普通用户（设备指纹唯一 + 同 IP 24h 限 2） |
 | POST | `/api/auth/logout` | 公开 | 登出（幂等） |
 | GET | `/api/auth/me` | 公开 | 当前登录状态，未登录 `data:null` |
+| GET | `/api/auth/users` | 站主 | 注册用户列表：`page` / `size`，返回 items + total + adminCount + newIn7Days |
 | POST | `/api/auth/password` | 登录用户 | 改密码（成功后踢掉所有会话） |
 | GET | `/api/comments?unreadOnly=&boardOnly=` | 站主 | 后台留言列表（含悄悄话 + 已屏蔽） |
 | PUT | `/api/comments/{id}` | 登录用户 | 改自己的留言（站主可改任何一条） |
@@ -486,6 +496,10 @@ qwen3.x / deepseek-v4.1 默认是推理模型：先吐几十段 `reasoning_conte
 
 实现方式是 `OpenAiChatOptions.extraBody(Map.of("enable_thinking", false))` ——
 这个 map 上有 `@JsonAnyGetter`，会被扁平化写进请求体顶层。
+
+⚠️ 但不是所有模型都接受这个参数：`glm-5.3` 和 `qwen3.8-2.4t-a95b` 传 `false`
+会直接 400（报文 `The value of the enable_thinking parameter is restricted to True`）。
+所以模型池里每个模型带一个 `supports-disable-thinking` 开关，见下一节。
 
 ### 5. 为什么做模型池而不是单模型
 
@@ -644,7 +658,7 @@ CREATE UNIQUE INDEX uk_kb_user_device ON kb_user (device_id) WHERE device_id IS 
 
 ### 13. 为什么开放注册后必须停用「清理非管理员账号」
 
-原来的 `AdminInitializer` 每次启动都执行 `DELETE FROM kb_user WHERE username <> '<管理员账号>'`
+原来的 `AdminInitializer` 每次启动都执行 `DELETE FROM kb_user WHERE username <> 'demo'`
 —— 单用户时代这是对的，能防止有人手工往库里塞账号。开放注册后它会**把所有注册用户删光**，
 每次重启清一次，等于注册功能白做。
 
@@ -691,7 +705,7 @@ Spring 报 `required a single bean, but 2 were found` 启动直接失败。
 外部依赖（向量库、地理库、解析器、限流、密码散列）收进 `infrastructure`。
 
 > 2026-10 重构过一次：原来是「按功能切包 + 手写 JdbcTemplate + Service 是具体类」，
-> 改成「按层切包 + MyBatis-Plus + Service 先接口后实现」，对齐主流 Spring 业务项目的写法。
+> 改成「按层切包 + MyBatis-Plus + Service 先接口后实现」，对齐主流 Spring 业务项目（以及本站作者另一个项目 haalan）的写法。
 > 旧结构不是错的，只是**两个项目两种风格，切换成本比统一成本高**。
 
 ```
@@ -789,6 +803,25 @@ rag-kb/                                  # 仓库根：前后端同一个 git �
 
 前四条已用脚本审计过，后两条靠代码评审。
 
+### 为什么检索要多一层「降级」
+
+概括性问题（「这里都讲了些什么？」「帮我总结一下主要内容」）和任何一段具体资料的
+语义都不接近。实测余弦相似度最高只有 0.2271，而正常阈值是 0.35 —— 一条都召不回来，
+prompt 里没有资料，模型只能老实回答「资料中未提及」。**问题不在模型，在召回。**
+
+所以 `ChatServiceImpl.retrieve` 会这样做：
+
+1. 先按配置阈值（0.35）检索一次
+2. 一条都没命中时，用 **0.15** 再检索一次
+3. 降级结果打上 `degraded` 标记，`IRetrievalService.Retrieved` 里能读到
+
+为什么 0.15 不能直接当默认值：太松，正常问题也会捞进一堆弱相关内容，prompt 变脏，
+答案准确率反而下降。**只有在一条都没召回时才降级**，平时保持严格。
+
+顺带一改：`buildPrompt` 在 `context` 为空时原来直接 `return question`，等于把裸问题
+丢给模型、连「没有资料」都不说一声，模型就用自己的知识瞎编。现在显式告诉它
+「本轮没有检索到相关资料」，它的回答才和 SYSTEM_PROMPT 的约束是一致的。
+
 ---
 
 ## 八、踩过的坑
@@ -818,12 +851,18 @@ rag-kb/                                  # 仓库根：前后端同一个 git �
 | 21 | 提交留言后拿不到 id，无法立即编辑 | 提交接口只返回提示语 | 改返回 `SubmitResult(id, notice, mine)` |
 | 22 | 全新库跑 v7 迁移报 `relation does not exist` | 迁移脚本裸 `INSERT ... FROM kb_moment_comment`，新库没这张表 | 包进 `DO $$ ... IF EXISTS ... END $$` |
 | 23 | `git add -A` 报 `short read while indexing NUL` | `scp -o UserKnownHostsFile=NUL` 在 Windows 上真的创建了名为 NUL 的文件 | scp 改用 `$env:TEMP\known_hosts`；删文件用 `[System.IO.File]::Delete('\\?\...\NUL')` |
-| 24 | 装 `http2 on;` 后 nginx 起不来 | 那是 nginx 1.25.1+ 的指令，CentOS 8 的 AppStream 仓库里只有 1.14.1 | 写成 `listen 443 ssl http2;`（1.14 时代 HTTP/2 是 `listen` 的参数） |
-| 25 | ACME 校验文件 404，证书签不下来 | 发行版自带的 nginx 配置有一个 `listen 80 default_server` 块，按 IP 访问会落到它 | 整份替换 `nginx.conf`，80 段显式声明 `default_server` 并路由 `.well-known/acme-challenge/` |
-| 26 | certbot 报 `Failed to resolve 'acme-staging-v02...'` | 容器内 DNS 瞬时抖动（宿主解析正常，容器共享宿主机内网 DNS） | 不改配置，重试即成功；docker 的 `--entrypoint sh` 才能进容器跑命令 |
+| 24 | 装 `http2 on;` 后 nginx 起不来 | 那是 nginx 1.25.1+ 的指令，CentOS 8 AppStream 只有 1.14.1 | 写成 `listen 443 ssl http2;`（1.14 时代 HTTP/2 是 listen 的参数） |
+| 25 | ACME 校验文件 404，证书签不下来 | CentOS nginx 包自带 `listen 80 default_server` 块，按 IP 访问落到它 | 整份替换 `nginx.conf`，80 段显式声明 `default_server` 并路由 `.well-known/acme-challenge/` |
+| 26 | certbot 报 `Failed to resolve 'acme-staging-v02...'` | 容器内 DNS 瞬时抖动（宿主解析正常，容器共享云厂商内网 DNS） | 不改配置，重试即成功；docker 的 `--entrypoint sh` 才能进容器跑命令 |
 | 27 | 浏览器控制台一直有 404 红字 | 没有 favicon，浏览器默认去要 `/favicon.ico` | `index.html` 里内联一个 data URI 的 SVG 图标，不新增文件 |
 | 28 | 加 nginx 后所有访客 IP 变成 127.0.0.1 | `rag.visit.trust-proxy` 的语义变了（以前是"没代理却信 XFF"，现在是"确实有代理"） | 保持 true，但 nginx 必须用 `$remote_addr` **覆盖** XFF，不能用 `$proxy_add_x_forwarded_for` 追加 |
-| 29 | 加 HTTPS 后 `http://IP:8080` 仍能明文访问 | Tomcat 默认监听 `0.0.0.0`，云安全组也还开着 8080 | `server.address: 127.0.0.1` 写进 `application.yml`，公网 8080 直接连不上 |
+| 29 | 加 HTTPS 后 `http://IP:8080` 仍能明文访问 | Tomcat 默认监听 `0.0.0.0`，安全组也还开着 8080 | `server.address: 127.0.0.1` 写进 `application.yml`，公网 8080 直接连不上 |
+| 30 | 重构后启动报 `No qualifying bean of type 'IXxxService'` | 脚本批量重写 Impl 时把类上的 `@Service` 全丢了；**编译期完全静默**，只有启动才炸 | 补回 `@Service`；批量改完必须 grep 注解数量。且 `ChatModelPoolImpl` / `CitationResolverImpl` 不带 Service 后缀，第一轮补漏漏掉了 |
+| 31 | 客服留言板 500 `NullPointerException ... Long.longValue()` | mapper 形参是原始类型 `long`，service 把游客场景的 `Long viewerId`（null）直接传进去 → 自动拆箱 | 加 `vid(Long)` 把 null 转 0；不能绑 null，`user_id = NULL` 会让整个 `OR` 退化 |
+| 32 | 上传成功但 `GET /api/documents/{返回的id}` 说文档不存在 | `BaseMapper.insert()` 返回的是受影响行数（int），不是自增 id；`long id = mapper.insert(po)` **编译能过**（int 自动拓宽 long），运行时恒为 1 | 统一 `mapper.insert(po); long id = po.getId();` —— 全仓 10 处 |
+| 33 | 问答功能正常但 `kb_chat` 一条记录都没有 | `sources` 是 jsonb，MP 按 String 走 `setString` → `column "sources" is of type jsonb but expression is of type character varying`；`ChatLogService` 捕获后只 warn | 建 `StringJsonbTypeHandler`（`PGobject` 写入）+ 字段挂 `typeHandler`。**全库查 `information_schema.columns WHERE data_type='jsonb'` 逐列确认，别靠猜** |
+| 34 | 「关于我」保存成功、DB 有值、接口返回空数组 | `@TableName(autoResultMap = true)` **只对 BaseMapper 自带方法生效**；自定义 `@Select` 不应用字段级 typeHandler | 该语句改用 XML `<resultMap>` 显式声明三个 jsonb 列的 TypeHandler |
+| 35 | 概括性问题（「这里都讲了些什么？」）永远答「资料中未提及」 | 语义上和任何一段具体资料都不接近，实测余弦相似度最高只有 **0.2271**，而阈值 0.35 → 召回为空 → prompt 里没资料 | 一条都没召回时用 **0.15** 降级重试一次（`Retrieved.degraded` 标记）；把「没资料」显式写进 prompt；备选问题换成语料能答的 |
 
 ---
 
@@ -838,10 +877,9 @@ rag-kb/                                  # 仓库根：前后端同一个 git �
 | 主页空白 | `curl http://127.0.0.1:8080/`（服务器上）是否有 index.html；jar 内 `BOOT-INF/classes/static/` 是否有文件 |
 | 问答 500 | `app.log` 搜 `WebClientResponseException` |
 | 问答 403 | 该模型的免费额度用光了。查 `GET /api/chat/models` 看是不是整个池子都冷却了；单个模型 403 已由模型池自动切换兜住 |
+| 问答 429 | 该 IP 触发限流，等一小时或调 `rag.rate-limit.chat-per-hour` |
 | 所有模型都说不可用 | `/api/chat/models` 看是不是全部冷却；`qwen3.7-flash` 系列 2026-10-23 到期，到期后要从池子里删 |
 | 回答一半断了 | 是模型中途失败。已吐字之后**故意不切换**（换模型会把两段不同风格答案拼起来），只能重问 |
-| 某个模型一直 fails>0 | 看 `lastError`。2026-10 遇到过 `kimi-k3` 不接受 `temperature` 参数，已在配置里标 `supports-temperature: false` 摘掉它。新加的模型如果报 `InvalidParameter`，先 curl 一遍带不带 temperature 各试一次 |
-| 问答 429 | 该 IP 触发限流，等一小时或调 `rag.rate-limit.chat-per-hour` |
 | 归属地一直「查询中」 | 检查 `geo_status` 是否为 FAILED（内网 IP 会直接失败，正常） |
 | 上传后一直 PENDING | 搜 `IndexingService` 日志找异常；`@Async` 异常不传播，靠日志 |
 | 登录一直失败 | `rag.admin.password` 是否配置；看启动日志 `已创建管理员账号` |
@@ -853,6 +891,9 @@ rag-kb/                                  # 仓库根：前后端同一个 git �
 | 「关于我」改了 yml 没效果 | 后台保存过就会读 `kb_profile`，改 yml 被忽略；点「恢复默认」或直接 `DELETE FROM kb_profile` |
 | 访客说留言发不出去 | 检查该动态 `visible` 是否为 false（仅自己可见的动态不能留言，返回 400） |
 | 动态视频传不上去 | `spring.servlet.multipart.max-file-size` 默认 50MB，视频超过会被拒；前端已先挡一道 |
+| 启动报 `No qualifying bean of type 'IXxxService'` | 对应 `XxxServiceImpl` 上的 `@Service` 是否还在（脚本重构最容易丢） |
+| 上传成功但按返回的 id 查不到 | 打完日志看 `insert()` 的返回值是不是被当成 id 用了；应该是 `po.getId()` |
+| 「关于我」存了但读出来是空数组 | `KbProfileMapper.xml` 的 `<resultMap>` 三个 jsonb `typeHandler` 是否还在 |
 | 后台留言红点不消失 | 红点 60 秒刷新一次；点进「看留言」或「全部标记已读」后立即消失 |
 | 访客看不到悄悄话（正常） | 悄悄话只有站主和作者能查，SQL 层就排除了，这是设计不是 bug |
 | 注册报「这个浏览器已经注册过账号了」 | 换浏览器 / 清 localStorage 里的 `kb.device.v1` / 查 `kb_user.device_id` |
@@ -865,41 +906,25 @@ rag-kb/                                  # 仓库根：前后端同一个 git �
 
 ## 十、部署到 2C2G 服务器
 
-这套东西的实际部署形态：**一台 2 核 2G 的云服务器，没有域名，裸 IP 上 HTTPS。**
+**部署只看两个文件：[DEPLOY-一键部署.md](DEPLOY-一键部署.md) + [DEPLOY-一键部署.sh](DEPLOY-一键部署.sh)。**
+全新装机器、改完代码重新上线、改配置、排障、回滚，全在这两个文件里。脚本是这台机器的实配版，含真实凭据，跑一条命令就是线上状态。
 
-```
-浏览器 ──80──► nginx ──301──► https
-          ──443─► nginx ──反代──► 127.0.0.1:8080 (Spring Boot, 静态资源也在 jar 里)
-                                      └──► 127.0.0.1:5432 (PostgreSQL + pgvector, Docker)
-```
+**HTTPS 的通用版脚本在 [deploy/https/README.md](deploy/https/README.md)**（不含真实 IP，签证书用 `--ip` 传参；原理说明 / 为什么用 IP 证书 / 续期怎么工作都在那）。
 
-几个和本项目强相关的决定：
-
-| 决定 | 理由 |
-| --- | --- |
-| 前端打进 jar，不起独立服务 | 2C2G 上省掉一个常驻进程和一套部署流程，代价是改前端要重新打包 |
-| 后端不走 Docker，PG 走 Docker | 后端是唯一的长驻 Java 进程，systemd 管着最省内存；PG 用 `pgvector/pgvector:pg16` 镜像开箱带扩展，自己编扩展太麻烦 |
-| 加 nginx 反代 | Tomcat 只在启动时读证书，不加 nginx 的话 160 小时的 IP 证书每续一次就要重启一次应用 |
-| `server.address: 127.0.0.1` | 只靠安全组挡 8080 不够 —— 换机器/改规则/临时排障都可能忘，写进配置才算数 |
-
-内存实测（2 核 2G 机器，1816MB 总）：
+内存实测（当前线上）：
 
 | 项 | 占用 |
 | --- | --- |
-| Java 进程 RSS | 约 410 MB |
-| nginx（3 个 worker） | 约 5-8 MB |
-| PostgreSQL 容器 | 约 65 MB |
+| Java 进程 RSS | 406 MB |
+| nginx（3 个 worker） | 约 8 MB |
+| PostgreSQL 容器 | 65 MB |
 | 系统 + 其他 | 约 155 MB |
-| **可用** | **约 890 MB** |
+| **可用** | **895 MB** |
 
 JVM 参数：`-Xms256m -Xmx512m -XX:MaxMetaspaceSize=160m -XX:MaxDirectMemorySize=64m -XX:+ExitOnOutOfMemoryError`
 
 > `MaxDirectMemorySize=64m` 是生死线：PDFBox 解析大 PDF 用 direct memory，
 > 超了直接 OOM。`ExitOnOutOfMemoryError` 让容器状态变干净，否则半死不活更难查。
 >
-> nginx 是后来加 HTTPS 时引入的。早前「不引 nginx 省 30MB」的判断在这个规模上被推翻了：
-> 实际常驻只有几 MB，换来的是「证书续期不用重启 Java 进程」。
-
-**HTTPS 怎么装的见 [deploy/https/README.md](deploy/https/README.md)** ——
-为什么给裸 IP 签 IP 证书、为什么必须有 nginx、续期脚本和 cron 怎么工作、出问题怎么查，
-都在那一份里。`deploy/https/` 下的三个 nginx 配置和两个脚本是可直接复用的。
+> nginx 是 2026-10-21 加 HTTPS 时引入的。早前"不引 nginx 省 30MB"的判断在这个版本上被推翻：
+> 实际常驻只有 8MB，换来的是「证书续期不用重启 Java 进程」。
