@@ -171,8 +171,13 @@ public class ChatModelPool {
 
     private ChatClient buildClient(Slot s) {
         OpenAiChatOptions.Builder ob = OpenAiChatOptions.builder()
-                .model(s.model.getName())
-                .temperature(temperature);
+                .model(s.model.getName());
+        if (s.model.isSupportsTemperature()) {
+            ob.temperature(temperature);
+        }
+        // 不支持 temperature 的模型（实测 kimi-k3）连这个字段都不能出现在请求体里，
+        // 否则 400 InvalidParameter。这里靠「不调 .temperature()」让 options 里是 null，
+        // Jackson 序列化时字段直接不写。
         if (s.model.isSupportsDisableThinking() && disableThinking) {
             // 百炼/硅基流动的推理模型默认开思考，先吐几十段 reasoning_content 再吐正文。
             // extraBody 上有 @JsonAnyGetter，会被扁平化写进请求体顶层
@@ -243,6 +248,7 @@ public class ChatModelPool {
                     s.model.getName(),
                     s.enabled,
                     s.model.isSupportsDisableThinking(),
+                    s.model.isSupportsTemperature(),
                     remain == 0,
                     remain / 1000,
                     s.failCount,
@@ -377,6 +383,7 @@ public class ChatModelPool {
     public record ModelStatus(String model,
                               boolean enabled,
                               boolean supportsDisableThinking,
+                              boolean supportsTemperature,
                               boolean available,
                               long cooldownSeconds,
                               int failCount,

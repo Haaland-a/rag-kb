@@ -147,6 +147,20 @@ public class ChatPoolProperties {
          */
         private boolean supportsDisableThinking = true;
 
+        /**
+         * 这个模型接不接受 {@code temperature} 参数。
+         *
+         * <p>⚠️ 实测 {@code kimi-k3} 不支持：传 {@code temperature:0.2} 直接
+         * {@code <400> InternalError.Algo.InvalidParameter: Parameter 'temperature'=0.2
+         * is not supported for kimi-k3 model.}。这种模型要把本字段设 false，
+         * 我们就不发 temperature，让它用自己默认值。</p>
+         *
+         * <p>注意这和「不传等于用默认」不是一回事：Spring AI 的
+         * {@code OpenAiChatOptions} 里 temperature 为 null 时不写进请求体，
+         * 所以设 false 只需要不调 {@code .temperature(...)}。</p>
+         */
+        private boolean supportsTemperature = true;
+
         /** 权重，预留给「好模型多分几次」用；当前轮转实现按顺序逐个走，未使用 */
         private int weight = 1;
 
@@ -169,6 +183,14 @@ public class ChatPoolProperties {
             this.supportsDisableThinking = supportsDisableThinking;
         }
 
+        public boolean isSupportsTemperature() {
+            return supportsTemperature;
+        }
+
+        public void setSupportsTemperature(boolean supportsTemperature) {
+            this.supportsTemperature = supportsTemperature;
+        }
+
         public int getWeight() {
             return weight;
         }
@@ -188,6 +210,7 @@ public class ChatPoolProperties {
         @Override
         public String toString() {
             return name + (supportsDisableThinking ? "" : "(thinking-required)")
+                    + (supportsTemperature ? "" : "(no-temperature)")
                     + (enabled ? "" : "(disabled)");
         }
     }

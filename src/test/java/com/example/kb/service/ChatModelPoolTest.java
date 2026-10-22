@@ -162,4 +162,35 @@ class ChatModelPoolTest {
         assertEquals(21600, quotaCd);
         assertEquals(300, errorCd);
     }
+
+    @Test
+    @DisplayName("temperature 不兼容的 400 属于 OTHER，靠配置摘参数而不是靠冷却兜")
+    void temperatureUnsupportedIsOther() throws Exception {
+        // 2026-10-22 线上真事：kimi-k3 收到 temperature 就 400，
+        // 报文 "Parameter 'temperature'=0.2 is not supported for kimi-k3 model."
+        // 它不是配额问题也不是限流，只能归 OTHER（冷却 5 分钟）。真正的修法是
+        // 在 rag.chat.pool.models 里给它标 supports-temperature: false，别再发这个参数。
+        Method classify = ChatModelPool.class.getDeclaredMethod("classify", Throwable.class);
+        classify.setAccessible(true);
+        Object kind = classify.invoke(null, new RuntimeException(
+                "<400> InternalError.Algo.InvalidParameter: Parameter 'temperature'=0.2 "
+                        + "is not supported for kimi-k3 model."));
+        assertEquals("OTHER", kind.toString(), "这个 400 不该被误判成额度或限流");
+    }
+
+    @Test
+    @DisplayName("supportsTemperature 默认 true，只有显式关掉才不发 temperature")
+    void supportsTemperatureDefaultsTrue() throws Exception {
+        Class<?> modelCls = Class.forName("com.example.kb.config.ChatPoolProperties$Model");
+        Constructor<?> ctor = modelCls.getDeclaredConstructor();
+        ctor.setAccessible(true);
+        Object m = ctor.newInstance();
+
+        // 默认必须是 true：否则所有模型都不发 temperature，回答风格会飘，
+        // 而绝大多数模型其实都接受这个参数。
+        assertEquals(Boolean.TRUE, modelCls.getMethod("isSupportsTemperature").invoke(m));
+
+        modelCls.getMethod("setSupportsTemperature", boolean.class).invoke(m, false);
+        assertEquals(Boolean.FALSE, modelCls.getMethod("isSupportsTemperature").invoke(m));
+    }
 }

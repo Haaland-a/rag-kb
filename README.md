@@ -232,6 +232,13 @@ rag:
 额度是**按模型分别给**的（每个 1M tokens），所以配了模型池：14 个模型轮转分担，
 某个额度耗尽（403）自动切下一个，用户无感。细节见 [六、5](#5-为什么做模型池而不是单模型)。
 
+⚠️ 有个坑只有真实请求才暴露：**`kimi-k3` 不接受 `temperature` 参数**，传 `temperature:0.2`
+直接回 `<400> InternalError.Algo.InvalidParameter: Parameter 'temperature'=0.2 is not supported
+for kimi-k3 model.`。池里给它标了 `supports-temperature: false`，构造 options 时不带这个字段。
+同理 `glm-5.3` 与 `qwen3.8-2.4t-a95b` 只接受 `enable_thinking:true`，标了
+`supports-disable-thinking: false`。这两个开关都只能靠上线后看 `GET /api/chat/models` 里
+对应模型的 `failCount` 才发现 —— 单测和启动检查都看不出来。
+
 ---
 
 ## 三、快速开始
@@ -823,6 +830,7 @@ rag-kb/                                  # 仓库根：前后端同一个 git �
 | 问答 403 | 该模型的免费额度用光了。查 `GET /api/chat/models` 看是不是整个池子都冷却了；单个模型 403 已由模型池自动切换兜住 |
 | 所有模型都说不可用 | `/api/chat/models` 看是不是全部冷却；`qwen3.7-flash` 系列 2026-10-23 到期，到期后要从池子里删 |
 | 回答一半断了 | 是模型中途失败。已吐字之后**故意不切换**（换模型会把两段不同风格答案拼起来），只能重问 |
+| 某个模型一直 fails>0 | 看 `lastError`。2026-10 遇到过 `kimi-k3` 不接受 `temperature` 参数，已在配置里标 `supports-temperature: false` 摘掉它。新加的模型如果报 `InvalidParameter`，先 curl 一遍带不带 temperature 各试一次 |
 | 问答 429 | 该 IP 触发限流，等一小时或调 `rag.rate-limit.chat-per-hour` |
 | 归属地一直「查询中」 | 检查 `geo_status` 是否为 FAILED（内网 IP 会直接失败，正常） |
 | 上传后一直 PENDING | 搜 `IndexingService` 日志找异常；`@Async` 异常不传播，靠日志 |

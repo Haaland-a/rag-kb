@@ -123,6 +123,13 @@ rag:
     #          → 标 supports-disable-thinking: false，不传这个参数
     #   排除 → qwen-mt-uni（翻译模型，要 input.target_lang，不是聊天模型）
     #
+    # 2026-10-22 上线后又发现一个：kimi-k3 不接受 temperature 参数
+    #   '<400> InternalError.Algo.InvalidParameter: Parameter temperature=0.2'
+    #   '... is not supported for kimi-k3 model.'
+    #   → 标 supports-temperature: false。其余 13 个都接受 temperature。
+    #   ⚠️ 这个坑只有在真实请求带 temperature 时才暴露，单测和启动都发现不了，
+    #   上线后要盯一眼 GET /api/chat/models 里 kimi-k3 的 failCount。
+    #
     # 换成别的服务商时，把模型名换成那家的即可；留空则退回单模型
     # （用 spring.ai.openai.chat.options.model 指定的那个）。
     pool:
@@ -134,6 +141,7 @@ rag:
         - name: deepseek-v4.1-flash-1017
         - name: qwen3.8-27b
         - name: kimi-k3
+          supports-temperature: false
         - name: qwen3.8-max-0902
         - name: deepseek-v4-flash-0731
         - name: qwen3.8-max
