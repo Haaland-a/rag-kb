@@ -6,7 +6,7 @@ server:
   # 限制在这里而不是只靠安全组：安全组是控制台里的状态，换台机器/重建规则就可能忘，
   # 而这一行跟着代码走，改错了 review 时看得见。
   # 万一 nginx 挂了：SSH 上去 `systemctl status nginx`，或者临时把这一行注释掉重启。
-  address: ${SERVER_ADDRESS:127.0.0.1}
+  address: 127.0.0.1
   port: 8080
   # 应用跑在 nginx 反代后面（公网 80/443 → nginx → 127.0.0.1:8080）。
   # native 让 Tomcat 认 X-Forwarded-For / X-Forwarded-Proto：
@@ -189,6 +189,16 @@ rag:
       probe-initial-delay-seconds: ${RAG_POOL_PROBE_INITIAL:120}
       probe-max-tokens: ${RAG_POOL_PROBE_MAX_TOKENS:1}
 
+  # ---------- 个人敏感信息脱敏 ----------
+  # 知识库里放的是站主自己的简历，手机号邮箱这些正则能挡住（PiiMasker 里的
+  # 手机号/邮箱/身份证/银行卡/座机规则）。姓名、学校、公司没有固定格式，
+  # 正则识别不了，只能由站主自己列出来。
+  #
+  # ⚠️ 这个词表只在服务端配置里填（生产改 application-prod.yml），
+  #   本文件进 git，这里放空数组 —— 否则公开仓库里就能看到站主真名，
+  #   脱敏表本身变成泄露源。
+  pii:
+    extra-terms: []
   # ---------- 按 IP 限流 ----------
   rate-limit:
     # 每个 IP 每小时能问几次。站主不受限

@@ -1,5 +1,7 @@
 package com.example.kb.service.impl;
 
+import com.example.kb.common.PiiMasker;
+import com.example.kb.common.PiiProperties;
 import com.example.kb.config.SiteProperties;
 import com.example.kb.domain.po.KbDocument;
 import com.example.kb.domain.vo.ChatQuota;
@@ -38,6 +40,7 @@ public class SiteServiceImpl implements ISiteService {
     private final IMediaService mediaService;
     private final IProfileService profileService;
     private final IMomentService momentService;
+    private final PiiProperties piiProperties;
 
     public SiteServiceImpl(SiteProperties site,
                        KbDocumentMapper documentMapper,
@@ -45,7 +48,8 @@ public class SiteServiceImpl implements ISiteService {
                        IpRateLimiter rateLimiter,
                        IMediaService mediaService,
                        IProfileService profileService,
-                       IMomentService momentService) {
+                       IMomentService momentService,
+                       PiiProperties piiProperties) {
         this.site = site;
         this.documentMapper = documentMapper;
         this.visitMapper = visitMapper;
@@ -53,6 +57,7 @@ public class SiteServiceImpl implements ISiteService {
         this.mediaService = mediaService;
         this.profileService = profileService;
         this.momentService = momentService;
+        this.piiProperties = piiProperties;
     }
 
     /**
@@ -83,7 +88,10 @@ public class SiteServiceImpl implements ISiteService {
                     .filter(d -> "READY".equals(d.getStatus()))
                     .sorted((a, b) -> Long.compare(b.getId(), a.getId()))
                     .limit(RECENT_LIMIT)
-                    .map(d -> new RecentDocument(d.getFilename(), d.getChunkCount(), d.getFileType()))
+                    .map(d -> new RecentDocument(
+                            PiiMasker.mask(d.getFilename(), piiProperties.getExtraTerms()),
+                            d.getChunkCount(),
+                            d.getFileType()))
                     .toList();
         }
         catch (Exception e) {
@@ -108,7 +116,13 @@ public class SiteServiceImpl implements ISiteService {
         // 一块查挂了不影响其他块和主页本身
         List<PhotoDto> photos = safeList("照片墙", mediaService::listVisiblePhotos);
         List<ProjectDto> projects = safeList("项目展示", mediaService::listVisibleProjects);
-        List<DownloadDto> downloads = safeList("下载列表", mediaService::listVisibleDownloads);
+        // ⚠️ 下载项的标题也要脱敏。站主上传简历时标题往往就是文件名，
+        // 「张三-Java后端开发-简历-v4」这种会把真名摆在主页最显眼的位置。
+        // 这是实测里漏掉的一处：正文、预览、文档文件名都堵住了，唯独下载标题没堵。
+        List<DownloadDto> downloads = safeList("下载列表", mediaService::listVisibleDownloads)
+                .stream()
+                .map(this::maskDownloadTitle)
+                .toList();
         // ⚠️ 这里传的是「看的人」，不是「是不是站主」：
         // 主页永远是公开视角，站主自己打开主页看到的也该是公开视图。
         // 悄悄话不进主页，只在后台留言管理里出现
@@ -149,5 +163,23 @@ public class SiteServiceImpl implements ISiteService {
             log.warn("主页{}加载失败，按空处理：{}", what, e.getMessage());
             return List.of();
         }
+    }
+
+    /**
+     * 下载项标题脱敏。只换标题，其他字段原样。
+     *
+     * <p>返回新的 {@link DownloadDto} 而不是原地改 —— record 不可变，
+     * 而且原地改会污染 MyBatis 二级缓存里那个对象。</p>
+     */
+    private DownloadDto maskDownloadTitle(DownloadDto d) {
+        if (d == null || d.title() == null || d.title().isEmpty()) {
+            return d;
+        }
+        String safe = PiiMasker.mask(d.title(), piiProperties.getExtraTerms());
+        if (safe.equals(d.title())) {
+            return d;
+        }
+        return new DownloadDto(d.id(), safe, d.url(), d.fileType(), d.fileSize(),
+                d.downloadCount(), d.sortOrder(), d.visible(), d.createdAt());
     }
 }

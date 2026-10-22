@@ -1,5 +1,7 @@
 package com.example.kb.service.impl;
 
+import com.example.kb.common.PiiMasker;
+import com.example.kb.common.PiiProperties;
 import com.example.kb.domain.vo.ChatQuota;
 import com.example.kb.infrastructure.ratelimit.IpRateLimiter;
 import com.example.kb.service.IChatModelPool;
@@ -39,13 +41,16 @@ public class ChatServiceImpl implements IChatService {
     private final IRetrievalService retrievalService;
     private final IChatModelPool modelPool;
     private final IpRateLimiter rateLimiter;
+    private final PiiProperties piiProperties;
 
     public ChatServiceImpl(IRetrievalService retrievalService,
                        IChatModelPool modelPool,
-                       IpRateLimiter rateLimiter) {
+                       IpRateLimiter rateLimiter,
+                       PiiProperties piiProperties) {
         this.retrievalService = retrievalService;
         this.modelPool = modelPool;
         this.rateLimiter = rateLimiter;
+        this.piiProperties = piiProperties;
     }
 
     /**
@@ -202,6 +207,11 @@ public class ChatServiceImpl implements IChatService {
      *
      * <p>⚠️ 引用标注用 [1][2] 而不是文件名：LLM 复述文件名容易改字，
      * 编号是稳定锚点，前端把编号映射到 sources 数组下标。</p>
+     *
+     * <p>⚠️ 资料正文<b>先脱敏再拼进 prompt</b>（{@link PiiMasker}）。这是防
+     * 个人信息泄露的根：内容进不到模型的上下文里，它就不可能把手机号、
+     * 邮箱念给访客听。前端预览那侧还有一道，见
+     * {@code CitationResolverImpl.preview}。</p>
      */
     private String buildPrompt(String question, List<Document> context) {
         if (context.isEmpty()) {
@@ -215,12 +225,23 @@ public class ChatServiceImpl implements IChatService {
         }
         StringBuilder sb = new StringBuilder();
         sb.append("以下是检索到的资料片段：\n\n");
+        int masked = 0;
         for (int i = 0; i < context.size(); i++) {
+            String raw = context.get(i).getText();
+            String safe = PiiMasker.mask(raw, piiProperties.getExtraTerms());
+            if (!java.util.Objects.equals(raw, safe)) {
+                masked++;
+            }
             sb.append("[")
                     .append(i + 1)
                     .append("] ")
-                    .append(context.get(i).getText())
+                    .append(safe)
                     .append("\n\n");
+        }
+        if (masked > 0) {
+            // 记条日志方便核对脱敏有没有生效。只记条数不记内容 ——
+            // 日志里再抄一遍被脱敏的东西，等于换个地方泄露。
+            log.debug("prompt 中 {} / {} 个资料片段含个人敏感信息，已脱敏", masked, context.size());
         }
         sb.append("请根据以上资料回答问题：").append(question);
         sb.append("\n\n回答中引用资料时用 [编号] 标注来源，例如「支持该功能 [1][3]」。");
@@ -254,5 +275,8 @@ public class ChatServiceImpl implements IChatService {
             3. 回答引用资料时，在对应句子末尾用 [编号] 标注，编号与资料片段序号一致。
             4. 回答简洁、直接，不要复述问题，不要输出资料原文。
             5. 如果多个资料片段结论冲突，指出冲突并分别说明来源。
+            6. ⚠️ 不得输出任何个人联系方式或身份号码，包括手机号、座机、邮箱、微信号、
+               身份证号、银行卡号、详细住址。资料里出现 [手机号已隐藏] 这类占位符时，
+               直接照抄占位符，不要尝试猜测或补全它背后是什么。
             """;
 }
