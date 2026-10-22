@@ -904,6 +904,8 @@ prompt 里没有资料，模型只能老实回答「资料中未提及」。**�
 | 33 | 问答功能正常但 `kb_chat` 一条记录都没有 | `sources` 是 jsonb，MP 按 String 走 `setString` → `column "sources" is of type jsonb but expression is of type character varying`；`ChatLogService` 捕获后只 warn | 建 `StringJsonbTypeHandler`（`PGobject` 写入）+ 字段挂 `typeHandler`。**全库查 `information_schema.columns WHERE data_type='jsonb'` 逐列确认，别靠猜** |
 | 34 | 「关于我」保存成功、DB 有值、接口返回空数组 | `@TableName(autoResultMap = true)` **只对 BaseMapper 自带方法生效**；自定义 `@Select` 不应用字段级 typeHandler | 该语句改用 XML `<resultMap>` 显式声明三个 jsonb 列的 TypeHandler |
 | 35 | 概括性问题（「这里都讲了些什么？」）永远答「资料中未提及」 | 语义上和任何一段具体资料都不接近，实测余弦相似度最高只有 **0.2271**，而阈值 0.35 → 召回为空 → prompt 里没资料 | 一条都没召回时用 **0.15** 降级重试一次（`Retrieved.degraded` 标记）；把「没资料」显式写进 prompt；备选问题换成语料能答的 |
+| 36 | 点「文档管理」完全没反应（不跳转、不报错、不提示） | Vite 每次构建给 chunk 加内容哈希，旧 chunk 被删；浏览器缓存里的旧 `index.html` 仍指向它 → 动态 import 404，Vue Router 把跳转静默吞掉，控制台只有一行 `Unable to preload CSS for ...` | ① `index.html` 设 `Cache-Control: no-cache`、`/assets/**` 设一年长缓存；② `router.onError` 识别 chunk 加载失败后整页重载一次（`sessionStorage` 记时间戳防死循环） |
+| 37 | 部署新版本后老用户仍看到旧页面 | `index.html` 没有 `Cache-Control`，只有 `Last-Modified`，浏览器可以一直用缓存里的副本 | 同上：`index.html` 必须 `no-cache`，带哈希的 `assets` 才适合长缓存 |
 
 ---
 

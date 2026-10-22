@@ -196,4 +196,38 @@ router.afterEach((to) => {
   document.title = to.meta.title ? `${to.meta.title} · ${base}` : base
 })
 
+/**
+ * 懒加载 chunk 预加载失败时的自愈。
+ *
+ * <p>⚠️ 这个坑真实发生过，症状极隐蔽：点「文档管理」**完全没反应** ——
+ * 路径不动、不报错、不提示，只在控制台留一行
+ * {@code Unable to preload CSS for /assets/DocumentsView-xxx.css}。</p>
+ *
+ * <p>成因：Vite 每次构建都给 chunk 加内容哈希，新版本上线旧文件就被删了。
+ * 如果浏览器用的还是缓存里的旧 index.html，它引用的旧 chunk 已经 404，
+ * 动态 import 直接 reject，路由跳转被吞掉。</p>
+ *
+ * <p>处理：识别出「加载 chunk 失败」后强刷一次页面，让浏览器取回新的
+ * index.html（后端已对 index.html 设 no-cache，刷新即可拿到新版本）。
+ * 用 sessionStorage 记一次，避免「刷新也失败」时陷入无限刷新。</p>
+ */
+const CHUNK_FAIL_PATTERN =
+  /Failed to fetch dynamically imported module|Unable to preload (CSS|module)|Importing a module script failed/i
+
+router.onError((error, to) => {
+  if (!CHUNK_FAIL_PATTERN.test(error?.message || '')) return
+  const key = 'rag-kb-chunk-reload'
+  const last = Number(sessionStorage.getItem(key) || 0)
+  // 60 秒内只自愈一次：确实版本不一致的话刷一次就好；
+  // 刷完还失败说明是别的问题，再刷就是死循环了
+  if (Date.now() - last < 60000) {
+    console.error('[router] 懒加载资源仍加载失败，请手动刷新或清缓存', error)
+    return
+  }
+  sessionStorage.setItem(key, String(Date.now()))
+  // 带上目标路径，刷新后直接落到用户想去的地方
+  const target = to?.fullPath || window.location.pathname
+  window.location.replace(target)
+})
+
 export default router

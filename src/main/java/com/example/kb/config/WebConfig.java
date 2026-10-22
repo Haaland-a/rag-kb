@@ -4,6 +4,7 @@ import com.example.kb.config.AuthInterceptor;
 import com.example.kb.infrastructure.storage.LocalStorage;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.CacheControl;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
@@ -11,6 +12,7 @@ import org.springframework.web.servlet.config.annotation.ViewControllerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 import java.nio.file.Path;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Web 配置：CORS + 认证拦截器 + 前端静态托管 + 本地媒体目录。
@@ -82,8 +84,27 @@ public class WebConfig implements WebMvcConfigurer {
                 .addResourceLocations(mediaDir)
                 .setCachePeriod(86400);
 
+        // ------------------------------------------------------------------
+        // 缓存策略：这两行是「部署后页面打不开」那个坑的根治办法
+        //
+        // 背景：Vite 每次 build 都给 chunk 文件名加内容哈希（DocumentsView-B-Ds1dqJ.js）。
+        // 新版本上线后旧 chunk 就没了。如果浏览器用的还是缓存里的旧 index.html，
+        // 它就会去加载已经被删掉的旧 chunk —— 动态 import 失败，Vue Router 的懒加载
+        // 直接抛错，用户点菜单**毫无反应**（不跳转、不报错、不提示）。
+        //
+        // 所以：
+        //   /assets/**  ：文件名带哈希，内容变了名字就变，可以放心缓存一年
+        //   /**         ：主要是 index.html，必须每次回源校验
+        //                 （no-cache 是「可缓存但每次先问服务器」，不是「不缓存」）
+        // ------------------------------------------------------------------
+        registry.addResourceHandler("/assets/**")
+                .addResourceLocations("classpath:/static/assets/")
+                .setCacheControl(CacheControl.maxAge(365, TimeUnit.DAYS).cachePublic())
+                .resourceChain(false);
+
         registry.addResourceHandler("/**")
                 .addResourceLocations("classpath:/static/")
+                .setCacheControl(CacheControl.noCache())
                 .resourceChain(true);
     }
 
