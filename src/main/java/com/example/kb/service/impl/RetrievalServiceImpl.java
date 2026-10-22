@@ -15,6 +15,9 @@ import org.springframework.stereotype.Service;
 @Service
 public class RetrievalServiceImpl implements IRetrievalService {
 
+    /** 降级检索时若调用方没给 topK，用这个值（和 rag.retrieval.top-k 的默认值一致） */
+    private static final int FALLBACK_TOP_K = 5;
+
     private final VectorStoreGateway vectorStoreGateway;
     private final KbChunkMapper chunkMapper;
     private final ICitationResolver citationResolver;
@@ -42,13 +45,31 @@ public class RetrievalServiceImpl implements IRetrievalService {
                 ? vectorStoreGateway.search(query, documentIds)
                 : vectorStoreGateway.search(query, documentIds, topK);
         List<SourceRef> sources = citationResolver.resolve(hits, loadChunkIndex(hits));
-        return new Retrieved(sources, hits);
+        return new Retrieved(sources, hits, false);
     }
 
     /**
-     * 一次检索的产物：{@code sources} 给前端渲染引用卡片，
-     * {@code context} 给 LLM 组 prompt，两者下标一一对应。
+     * 同上，但允许传一个更低的相似度阈值。
+     *
+     * <p>⚠️ 两个阈值都不命中时返回空列表，<b>不会</b>兜底返回「最像的那一条」。
+     * 空列表 → prompt 里没有资料 → 模型回答「资料中未提及」。
+     * 硬塞几条不相关的段落反而更糟：模型会一本正经地拿不相干内容回答，
+     * 人看了比「不知道」更难受。</p>
+     *
+     * <p>这个方法只为「概括性问题」存在：像「这里都讲了些什么？」这种问题，
+     * 语义上和任何一段具体资料都不接近（实测最相近的一段余弦相似度只有
+     * 0.2271），正常阈值 0.35 一定过不了。降级到 0.15 能召回几条，模型就能
+     * 总结出「这个站里有哪些资料」。</p>
+     *
+     * @param threshold 覆盖配置阈值；必须落在 (0, 1]，越界由 Gateway 夹逼
      */
+    public Retrieved retrieve(String query, List<Long> documentIds, Integer topK, Double threshold) {
+        int limit = topK == null ? FALLBACK_TOP_K : topK;
+        List<Document> hits = vectorStoreGateway.searchWithThreshold(
+                query, documentIds, limit, threshold);
+        List<SourceRef> sources = citationResolver.resolve(hits, loadChunkIndex(hits));
+        return new Retrieved(sources, hits, true);
+    }
 
     /** 按 chunkId 建索引，ICitationResolver 兜底回查用 */
     private Map<Long, KbChunk> loadChunkIndex(List<Document> hits) {

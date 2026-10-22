@@ -1,11 +1,16 @@
 package com.example.kb.service.impl;
 
+import com.example.kb.common.TimeFormat;
 import com.example.kb.domain.dto.AuthDtos.UserInfo;
 import com.example.kb.domain.po.KbUser;
+import com.example.kb.domain.vo.UserPage;
+import com.example.kb.domain.vo.UserRowVO;
 import com.example.kb.infrastructure.security.PasswordHasher;
 import com.example.kb.infrastructure.security.TokenStore;
 import com.example.kb.mapper.KbUserMapper;
 import com.example.kb.service.IAuthService;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,6 +26,8 @@ public class AuthServiceImpl implements IAuthService {
     private static final int REGISTER_IP_WINDOW_HOURS = 24;
     /** 该窗口内允许的账号数（含第一个，所以 2 表示「还能再注册 1 个」） */
     private static final int REGISTER_IP_MAX = 2;
+    /** 用户列表单页上限：后台列表页不需要更多，也防止被当导出接口用 */
+    private static final int MAX_USER_PAGE_SIZE = 200;
 
     private final KbUserMapper userMapper;
     private final PasswordHasher passwordHasher;
@@ -119,7 +126,7 @@ public class AuthServiceImpl implements IAuthService {
             throw new IllegalArgumentException("密码太长了");
         }
 
-        // ⚠️ 站主用户名不可注册。否则有人抢注站主用户名，
+        // ⚠️ 站主用户名不可注册。否则有人抢注管理员用户名，
         // 虽然登录不进去（密码不同），但界面上会显示成两个同名账号，能骗到访客
         if (name.equalsIgnoreCase(adminUsername)) {
             throw new IllegalStateException("这个名字被站主保留了，换一个吧");
@@ -204,6 +211,61 @@ public class AuthServiceImpl implements IAuthService {
         return info;
     }
 
+    /**
+     * 用户列表（站主后台用）。
+     *
+     * <p>分页参数在这里夹逼：{@code size} 上限 200，避免有人传
+     * {@code size=100000} 把整张表捞出来当导出接口用。</p>
+     *
+     * <p>⚠️ 三个数字分别 try/catch：后台页面「有几个账号」算错了不该让
+     * 整个列表 500 —— 列表本身才是这个页面存在的理由。</p>
+     */
+    public UserPage listUsers(int page, int size) {
+        int safeSize = Math.max(1, Math.min(size, MAX_USER_PAGE_SIZE));
+        int safePage = Math.max(1, page);
+        int offset = (safePage - 1) * safeSize;
+
+        List<KbUser> rows = userMapper.selectRecent(safeSize, offset);
+
+        long total = 0;
+        long adminCount = 0;
+        long newIn7Days = 0;
+        try {
+            total = userMapper.count();
+        }
+        catch (Exception e) {
+            log.warn("统计账号总数失败：{}", e.getMessage());
+        }
+        try {
+            newIn7Days = userMapper.countNewSince(7 * 24);
+        }
+        catch (Exception e) {
+            log.warn("统计 7 天新注册数失败：{}", e.getMessage());
+        }
+
+        List<UserRowVO> items = new ArrayList<>(rows.size());
+        for (KbUser u : rows) {
+            UserRowVO vo = toRow(u);
+            items.add(vo);
+            if (vo.isAdmin()) {
+                adminCount++;
+            }
+        }
+        return new UserPage(items, total, adminCount, newIn7Days, safePage, safeSize);
+    }
+
+    private UserRowVO toRow(KbUser u) {
+        UserRowVO vo = new UserRowVO();
+        vo.setId(u.getId());
+        vo.setUsername(u.getUsername());
+        vo.setDisplayName(u.getDisplayName());
+        vo.setCreatedAt(TimeFormat.format(u.getCreatedAt()));
+        vo.setLastLoginAt(TimeFormat.format(u.getLastLoginAt()));
+        vo.setRegisterIp(u.getRegisterIp());
+        vo.setAdmin(isAdmin(u.getUsername()));
+        vo.setDeviceBound(u.getDeviceId() != null && !u.getDeviceId().isBlank());
+        return vo;
+    }
     /**
      * 判断某个用户是不是站主。
      *

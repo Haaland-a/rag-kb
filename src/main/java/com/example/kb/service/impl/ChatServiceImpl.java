@@ -23,6 +23,19 @@ public class ChatServiceImpl implements IChatService {
 
     private static final Logger log = LoggerFactory.getLogger(ChatServiceImpl.class);
 
+    /**
+     * 降级检索的阈值。
+     *
+     * <p>概括性问题（「这里都讲了些什么？」）语义上和任何一段具体资料都不接近，
+     * 实测余弦相似度最高只有 0.2271，正常阈值 0.35 一定过不了 → 召回为空
+     * → 模型只能答「资料中未提及」。降到 0.15 能捞出几条，模型就能总结。</p>
+     *
+     * <p>为什么不能直接把这个阈值当默认值：0.15 太松，正常问题也会捞进一堆
+     * 弱相关内容，prompt 变脏，答案准确率下降。只在「一条都没召回」时降级，
+     * 平时保持严格。</p>
+     */
+    private static final double FALLBACK_THRESHOLD = 0.15;
+
     private final IRetrievalService retrievalService;
     private final IChatModelPool modelPool;
     private final IpRateLimiter rateLimiter;
@@ -89,7 +102,20 @@ public class ChatServiceImpl implements IChatService {
      * （引用编号指向空内容）。一次检索是唯一正确做法。</p>
      */
     public IRetrievalService.Retrieved retrieve(String question, List<Long> documentIds, Integer topK) {
-        return retrievalService.retrieve(question, documentIds, topK);
+        IRetrievalService.Retrieved first = retrievalService.retrieve(question, documentIds, topK);
+        if (!first.sources().isEmpty()) {
+            return first;
+        }
+        // 一条都没召回 —— 可能是概括性问题（「这里都讲了些什么？」），
+        // 放宽阈值再捞一次。捞到的其实是「最不相关里最相关的几条」，
+        // 但对「总结一下」类问题是够用的，比直接答「未提及」好。
+        IRetrievalService.Retrieved second =
+                retrievalService.retrieve(question, documentIds, topK, FALLBACK_THRESHOLD);
+        if (second.sources().isEmpty()) {
+            return second;
+        }
+        log.info("首轮检索无命中，已降级到阈值 {} 重试，召回 {} 条", FALLBACK_THRESHOLD, second.sources().size());
+        return second;
     }
 
     /** 模型池状态，给站主后台看 */
@@ -179,7 +205,13 @@ public class ChatServiceImpl implements IChatService {
      */
     private String buildPrompt(String question, List<Document> context) {
         if (context.isEmpty()) {
-            return question;
+            // ⚠️ 这里以前是 `return question`，等于把裸问题丢给模型、连「没有资料」
+            //    都不说一声。模型不知道自己在答一个知识库问题，就会用自己的知识
+            //    瞎编 —— 而 SYSTEM_PROMPT 又要求「只用资料」，两边打架。
+            //    现在显式告诉它：没检索到资料。
+            return "以下是检索到的资料片段：\n\n（本轮没有检索到与该问题相关的资料）\n\n"
+                    + "请根据以上资料回答问题：" + question
+                    + "\n\n如果资料为空，请直接回答「资料中未提及」，不要使用你自己的知识补充。";
         }
         StringBuilder sb = new StringBuilder();
         sb.append("以下是检索到的资料片段：\n\n");

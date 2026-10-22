@@ -126,6 +126,12 @@ const routes = [
         meta: { title: '问答记录', requiresAuth: true }
       },
       {
+        path: 'users',
+        name: 'admin-users',
+        component: () => import('@/views/UsersView.vue'),
+        meta: { title: '注册用户', requiresAuth: true }
+      },
+      {
         path: 'visits',
         name: 'visits',
         component: () => import('@/views/VisitsView.vue'),

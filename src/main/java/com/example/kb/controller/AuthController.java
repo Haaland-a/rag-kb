@@ -13,12 +13,15 @@ import com.example.kb.service.IVisitService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.util.Optional;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 /**
  * 认证接口。
  *
@@ -162,5 +165,30 @@ public class AuthController {
             throw new IllegalArgumentException("原密码错误");
         }
         return R.ok(null);
+    }
+
+    /**
+     * 用户列表（站主专用）。
+     *
+     * <p>放在 {@code /api/auth} 下而不是新开一个 {@code /api/users}：这个接口读的是
+     * 认证体系里的账号表，和 login/register/me/password 是同一组东西，
+     * 拆到另一个前缀只会让「账号相关的东西在哪」多一个记忆点。</p>
+     *
+     * <p>⚠️ 必须显式判 {@code admin} attribute，不能只靠 AuthInterceptor：
+     * {@code /api/auth/**} 里登录/注册/me 都是公开的，所以这个前缀不在
+     * {@code ADMIN_PATHS} 里，拦截器只保证「认证过」不保证「是站主」。
+     * 少了这一判就是<b>任何注册用户都能看到全部账号</b>。</p>
+     *
+     * <p>⚠️ 返回体是 {@link com.example.kb.domain.vo.UserPage}，里面的每一项是
+     * {@code UserRowVO} —— 没有 passwordHash、没有 deviceId。</p>
+     */
+    @GetMapping("/users")
+    public R users(HttpServletRequest request,
+                   @RequestParam(value = "page", defaultValue = "1") int page,
+                   @RequestParam(value = "size", defaultValue = "20") int size) {
+        if (!Boolean.TRUE.equals(request.getAttribute("admin"))) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "只有站主能看用户列表");
+        }
+        return R.ok(authService.listUsers(page, size));
     }
 }

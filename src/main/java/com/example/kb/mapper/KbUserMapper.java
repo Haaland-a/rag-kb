@@ -45,6 +45,25 @@ public interface KbUserMapper extends BaseMapper<KbUser> {
             + " WHERE register_ip = #{ip} AND created_at > now() - (#{hours} || ' hours')::interval")
     long countByRegisterIpSince(@Param("ip") String ip, @Param("hours") int hours);
 
+    /**
+     * 用户列表（站主后台用），新注册的排前面。
+     *
+     * <p>用 {@code LIMIT/OFFSET} 分页而不是 MP 的 {@code selectPage}：
+     * 账号量是个位数到几十，一次 count + 一次 limit 就够，
+     * 不必为一个后台列表页去装分页拦截器。真要上十万账号再说。</p>
+     *
+     * <p>⚠️ 返回的是 {@code KbUser} 实体，里面带 {@code passwordHash}。
+     * <b>绝对不要在 Controller 里直接返回它</b> —— 必须经
+     * {@code IAuthService#listUsers} 转成
+     * {@link com.example.kb.domain.vo.UserRowVO}。</p>
+     */
+    @Select("SELECT * FROM kb_user ORDER BY created_at DESC, id DESC LIMIT #{limit} OFFSET #{offset}")
+    java.util.List<KbUser> selectRecent(@Param("limit") int limit, @Param("offset") int offset);
+
+    /** 最近 hours 小时内新注册的账号数（后台概览用） */
+    @Select("SELECT count(*) FROM kb_user WHERE created_at > now() - (#{hours} || ' hours')::interval")
+    long countNewSince(@Param("hours") int hours);
+
     @Update("UPDATE kb_user SET password_hash = #{passwordHash} WHERE id = #{id}")
     int updatePasswordHash(@Param("id") long id, @Param("passwordHash") String passwordHash);
 

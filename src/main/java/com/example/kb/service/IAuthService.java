@@ -94,4 +94,19 @@ public interface IAuthService {
      */
     public boolean isAdmin(String username);
 
+    /**
+     * 用户列表（站主后台用）。
+     *
+     * <p>⚠️ 参数夹逼在 Service 里做，Controller 只传原值：分页参数是外部输入，
+     * {@code size=100000} 打进来会把整张表捞出来。上限 200 是「一屏最多看几十行，
+     * 200 已经够翻到」，同时避免有人拿这个接口当导出用。</p>
+     *
+     * <p>⚠️ 返回的 {@link com.example.kb.domain.vo.UserRowVO} 里没有
+     * {@code passwordHash}，也没有 {@code deviceId}。</p>
+     *
+     * @param page 页码，从 1 开始；小于 1 按 1 处理
+     * @param size 每页条数；小于 1 按 20 处理，大于 200 按 200 处理
+     */
+    public com.example.kb.domain.vo.UserPage listUsers(int page, int size);
+
 }

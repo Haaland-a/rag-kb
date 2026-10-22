@@ -119,6 +119,39 @@ public class VectorStoreGateway {
     }
 
     /**
+     * 同上，但显式指定相似度阈值（覆盖配置值）。
+     *
+     * <p>⚠️ 只在「没命中时降级重试」这一个场景用，所以它只接受一个
+     * 固定的小阈值，不对外暴露给前端。前端的 topK 可以调，阈值不行 ——
+     * 阈值调成 0 等于把整张向量表捞出来塞进 prompt。</p>
+     *
+     * <p>为什么需要降级：像「这里都讲了些什么？」这种概括性问题，
+     * 语义上和任何一段具体资料都不接近，实测余弦相似度只有 0.22~0.23，
+     * 而正常问题的阈值是 0.35。于是召回为空 → prompt 里没有任何资料
+     * → 模型只能老实回答「资料中未提及」。问题不在模型，在召回。</p>
+     *
+     * @param threshold 覆盖配置的相似度阈值，内部夹逼到 (0, 1]
+     */
+    public List<Document> searchWithThreshold(String query, List<Long> documentIds,
+                                              int topK, double threshold) {
+        double safe = Math.max(0.01, Math.min(threshold, 1.0));
+        SearchRequest.Builder builder = SearchRequest.builder()
+                .query(query)
+                .topK(topK)
+                .similarityThreshold(safe);
+        if (documentIds != null && !documentIds.isEmpty()) {
+            FilterExpressionBuilder feb = new FilterExpressionBuilder();
+            builder.filterExpression(feb.in(META_DOCUMENT_ID, documentIds.toArray()).build());
+        }
+        return vectorStore.similaritySearch(builder.build());
+    }
+
+    /** 配置里的相似度阈值，给降级逻辑判断「值不值得放宽」用 */
+    public double getSimilarityThreshold() {
+        return similarityThreshold;
+    }
+
+    /**
      * KbChunk → Spring AI Document，并把 metadata key 约定落到这一处。
      *
      * <p>id 必须是合法 UUID 字符串（PgVectorStore 的 UUID.fromString 会解析它）。

@@ -34,7 +34,9 @@ export const authApi = {
   register: (body) => http.post('/auth/register', body),
   logout: () => http.post('/auth/logout'),
   changePassword: (oldPassword, newPassword) =>
-    http.post('/auth/password', { oldPassword, newPassword })
+    http.post('/auth/password', { oldPassword, newPassword }),
+  /** 注册用户列表（仅站主）：分页 + 总数 + 管理员数 + 近 7 天新增 */
+  users: (page = 1, size = 20) => http.get('/auth/users', { params: { page, size } })
 }
 
 /**

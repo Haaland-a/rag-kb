@@ -82,7 +82,8 @@ import {
   Odometer,
   Picture,
   Search,
-  User
+  User,
+  UserFilled
 } from '@element-plus/icons-vue'
 import { siteApi, authApi, commentApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
@@ -103,6 +104,7 @@ const navItems = [
   { to: '/admin/comments', label: '留言管理', icon: ChatLineSquare, badge: true },
   { to: '/admin/chats', label: '问答记录', icon: Search },
   { to: '/admin/profile', label: '关于我', icon: User },
+  { to: '/admin/users', label: '注册用户', icon: UserFilled },
   { to: '/admin/visits', label: '访问记录', icon: Location }
 ]
 

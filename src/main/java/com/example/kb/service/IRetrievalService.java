@@ -19,7 +19,14 @@ public interface IRetrievalService {
      * 一次检索的产物：{@code sources} 给前端渲染引用卡片，
      * {@code context} 给 LLM 组 prompt，两者下标一一对应。
      */
-    public record Retrieved(List<SourceRef> sources, List<Document> context) {
+    /**
+     * 一次检索的产物：{@code sources} 给前端渲染引用卡片，
+     * {@code context} 给 LLM 组 prompt，两者下标一一对应。
+     *
+     * @param degraded 是否走了降级路径（主阈值没命中，放宽到 fallback 阈值又查了一次）。
+     *                 前端可以用它做一点提示，比如「没找到很贴切的段落，下面是从最相关的内容里总结的」。
+     */
+    public record Retrieved(List<SourceRef> sources, List<Document> context, boolean degraded) {
     }
 
     /**
@@ -33,5 +40,13 @@ public interface IRetrievalService {
      * @param topK        null = 用配置默认值
      */
     public Retrieved retrieve(String query, List<Long> documentIds, Integer topK);
+
+    /**
+     * 同上，但允许调用方传一个更低的阈值（{@code null} = 用配置值）。
+     *
+     * <p>⚠️ 阈值只降低不放宽到 0：{@code ChatServiceImpl} 在「兜底问题」
+     * 和「本轮没召回」时各用一次，都是传固定的 0.15。
+     */
+    public Retrieved retrieve(String query, List<Long> documentIds, Integer topK, Double threshold);
 
 }

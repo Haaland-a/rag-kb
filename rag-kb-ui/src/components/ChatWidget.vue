@@ -155,7 +155,7 @@ const quotaLeft = computed(() => {
   return r < 0 ? null : r
 })
 
-const hints = ['这里都讲了些什么？', '帮我总结一下主要内容', '有哪些关键点？']
+const hints = ['这个系统用了什么技术栈？', '简历里有哪些项目经历？', '这里都讲了些什么？']
 
 let abortStream = null
 
