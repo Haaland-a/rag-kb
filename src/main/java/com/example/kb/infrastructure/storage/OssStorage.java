@@ -36,7 +36,7 @@ public class OssStorage implements FileStorage {
      * @param akId     AccessKey ID
      * @param akSecret AccessKey Secret
      * @param publicBase 公共访问域名。留空则自动拼 {@code https://bucket.endpoint}
-     * @param keyPrefix 对象键前缀，如 {@code my-app}。留空则直接写在 bucket 根下。
+     * @param keyPrefix 对象键前缀，如 {@code rag-site}。留空则直接写在 bucket 根下。
      *                  ⚠️ 这个参数是为了<b>不污染 bucket 里已有的文件</b>：
      *                  多个项目共用一个 bucket 时，各自加前缀就互不干扰，
      *                  删除时也只会删到自己前缀下的对象。
@@ -133,7 +133,7 @@ public class OssStorage implements FileStorage {
      * 从公开 URL 反推逻辑键（去掉前缀）。
      *
      * <p>⚠️ 必须先去掉 {@code keyPrefix} 再返回，因为 {@link #delete} 会再拼一次。
-     * 如果这里返回带前缀的完整键，删除时会变成 {@code my-app/my-app/xxx}，
+     * 如果这里返回带前缀的完整键，删除时会变成 {@code rag-site/rag-site/xxx}，
      * 结果「删除成功但文件还在」。这个 bug 只有在开了前缀时才会暴露。</p>
      */
     @Override

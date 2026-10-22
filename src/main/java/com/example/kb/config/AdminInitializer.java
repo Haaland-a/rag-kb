@@ -1,8 +1,8 @@
 package com.example.kb.config;
 
-import com.example.kb.domain.KbUser;
+import com.example.kb.domain.po.KbUser;
 import com.example.kb.infrastructure.security.PasswordHasher;
-import com.example.kb.repository.KbUserRepository;
+import com.example.kb.mapper.KbUserMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -12,16 +12,16 @@ import org.springframework.stereotype.Component;
 /**
  * 启动时保证「唯一管理员」存在，且密码是配置里那个。
  *
- * <p>需求是「站主一个人是管理员」。所以这里的策略不是「有用户就不管」，而是
- * <b>强制对齐</b>：</p>
+ * <p>需求是「只有我一个用户是真正的管理员，没有别的用户」。所以这里的策略不是
+ * 「有用户就不管」，而是<b>强制对齐</b>：</p>
  * <ol>
- *   <li>库里没有管理员账号 → 建一个，密码取配置</li>
- *   <li>库里有管理员账号但密码对不上配置 → 改成配置的密码</li>
- *   <li>普通注册用户不归这里管（见 removeOtherUsers 的说明）</li>
+ *   <li>库里没有 haaland → 建一个，密码取配置</li>
+ *   <li>库里有 haaland 但密码对不上配置 → 改成配置的密码</li>
+ *   <li>删掉除 haaland 以外的所有用户（保证「没有别的用户」）</li>
  * </ol>
  *
  * <p>⚠️ 第 2 条是把<b>配置文件当唯一事实源</b>。好处是改密码不用进服务器跑 SQL，
- * 改配置文件重启即可；代价是配置文件里存了明文密码，
+ * 改生产配置文件重启即可；代价是配置文件里存了明文密码，
  * 必须保证文件权限 600、不进 git。README 里已注明。</p>
  *
  * <p>⚠️ BCrypt 是 100ms 级的慢操作。如果每次启动都无条件 hash 一遍再比对，
@@ -33,28 +33,22 @@ public class AdminInitializer implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(AdminInitializer.class);
 
-    private final KbUserRepository userRepository;
+    private final KbUserMapper userMapper;
     private final PasswordHasher passwordHasher;
 
-    /** 管理员账号，默认 demo（可用 rag.admin.username 覆盖） */
+    /** 管理员账号，默认 haaland（需求指定） */
     private final String adminUsername;
-
-    /** 管理员展示名，可用 rag.admin.display-name 覆盖，缺省同账号名 */
-    private final String adminDisplayName;
 
     /** 管理员初始密码。默认空串，必须由配置或环境变量 RAG_ADMIN_PASSWORD 提供 */
     private final String adminPassword;
 
-    public AdminInitializer(KbUserRepository userRepository,
+    public AdminInitializer(KbUserMapper userMapper,
                             PasswordHasher passwordHasher,
                             @Value("${rag.admin.username:demo}") String adminUsername,
-                            @Value("${rag.admin.display-name:}") String adminDisplayName,
                             @Value("${rag.admin.password:}") String adminPassword) {
-        this.userRepository = userRepository;
+        this.userMapper = userMapper;
         this.passwordHasher = passwordHasher;
         this.adminUsername = adminUsername;
-        this.adminDisplayName = (adminDisplayName == null || adminDisplayName.isBlank())
-                ? adminUsername : adminDisplayName;
         this.adminPassword = adminPassword;
     }
 
@@ -79,13 +73,13 @@ public class AdminInitializer implements ApplicationRunner {
     }
 
     private void ensureAdmin() {
-        var existing = userRepository.findByUsername(adminUsername);
+        var existing = userMapper.findByUsername(adminUsername);
         if (existing.isEmpty()) {
             KbUser user = new KbUser();
             user.setUsername(adminUsername);
             user.setPasswordHash(passwordHasher.hash(adminPassword));
-            user.setDisplayName(adminDisplayName);
-            long id = userRepository.insert(user);
+            user.setDisplayName(adminUsername);
+            long id = userMapper.insert(user);
             log.info("已创建管理员账号 {}（id={}），密码取自配置", adminUsername, id);
             return;
         }
@@ -97,7 +91,7 @@ public class AdminInitializer implements ApplicationRunner {
         }
 
         // 密码对不上 → 以配置为准。这就是「改配置重启即生效」的实现
-        userRepository.updatePasswordHash(user.getId(), passwordHasher.hash(adminPassword));
+        userMapper.updatePasswordHash(user.getId(), passwordHasher.hash(adminPassword));
         log.info("管理员账号 {} 的密码已按配置重置", adminUsername);
     }
 
@@ -119,11 +113,11 @@ public class AdminInitializer implements ApplicationRunner {
     @Deprecated
     @SuppressWarnings("unused")
     private void removeOtherUsers() {
-        long total = userRepository.count();
+        long total = userMapper.count();
         if (total <= 1) {
             return;
         }
-        int removed = userRepository.deleteAllExcept(adminUsername);
+        int removed = userMapper.deleteAllExcept(adminUsername);
         if (removed > 0) {
             log.warn("检测到 {} 个非管理员账号，已删除（本站只允许 {} 一个用户）。"
                     + "如需多用户请先删除 AdminInitializer.removeOtherUsers()",

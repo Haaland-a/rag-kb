@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+  kb_visit 的按 IP 聚合查询。
+
+  ⚠️ 归属地取「最近一次」而不是 max(country)：
+  同一个 IP 上一秒可能 geo_status=PENDING（country 为 null）、
+  下一秒查到「中国 山西 晋中」，用 max() 会按字母序挑出一个错的；
+  用 (array_agg(... ORDER BY created_at DESC))[1] 才是「最新那条」的值。
+
+  ⚠️ WHERE is_admin = false：站主自己访问不该混进「访客排行」，
+  否则榜首永远是站主，那一列数据就没有意义了。
+-->
+<mapper namespace="com.example.kb.mapper.KbVisitMapper">
+
+    <resultMap id="visitorSummaryMap" type="com.example.kb.domain.vo.VisitorSummary">
+        <result property="ip" column="ip"/>
+        <result property="hits" column="hits"/>
+        <result property="lastSeen" column="last_seen"/>
+        <result property="country" column="country"/>
+        <result property="region" column="region"/>
+        <result property="city" column="city"/>
+    </resultMap>
+
+    <select id="summarizeByIp" resultMap="visitorSummaryMap">
+        SELECT ip,
+               count(*)                AS hits,
+               max(created_at)         AS last_seen,
+               (array_agg(country ORDER BY created_at DESC))[1] AS country,
+               (array_agg(region  ORDER BY created_at DESC))[1] AS region,
+               (array_agg(city    ORDER BY created_at DESC))[1] AS city
+        FROM kb_visit
+        WHERE is_admin = FALSE
+        GROUP BY ip
+        ORDER BY max(created_at) DESC
+        LIMIT #{limit}
+    </select>
+</mapper>

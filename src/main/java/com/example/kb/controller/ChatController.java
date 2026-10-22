@@ -1,15 +1,15 @@
 package com.example.kb.controller;
 
 import com.example.kb.common.R;
-import com.example.kb.dto.chat.ChatDoneEvent;
-import com.example.kb.dto.chat.ChatQuota;
-import com.example.kb.dto.chat.ChatRequest;
-import com.example.kb.dto.chat.SourceRef;
+import com.example.kb.domain.vo.ChatDoneEvent;
+import com.example.kb.domain.vo.ChatQuota;
+import com.example.kb.domain.dto.ChatRequest;
+import com.example.kb.domain.vo.SourceRef;
 import com.example.kb.infrastructure.geo.ClientIpResolver;
-import com.example.kb.service.ChatLogService;
-import com.example.kb.service.ChatService;
-import com.example.kb.service.RetrievalService;
-import com.example.kb.service.VisitService;
+import com.example.kb.service.IChatLogService;
+import com.example.kb.service.IChatService;
+import com.example.kb.service.IRetrievalService;
+import com.example.kb.service.IVisitService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
@@ -55,7 +55,7 @@ import java.util.Objects;
  * <p>别人的网站访客不需要登录就能问问题，这是需求本身。代价是被刷的风险，
  * 所以有两道闸：</p>
  * <ol>
- *   <li>按 IP 限流（规则在 {@link ChatService#consumeQuota}），默认每小时 20 次</li>
+ *   <li>按 IP 限流（规则在 {@link IChatService#consumeQuota}），默认每小时 20 次</li>
  *   <li>模型侧免费额度（阿里云百炼）是最终兜底</li>
  * </ol>
  */
@@ -65,14 +65,14 @@ public class ChatController {
 
     private static final Logger log = LoggerFactory.getLogger(ChatController.class);
 
-    private final ChatService chatService;
-    private final ChatLogService chatLogService;
-    private final VisitService visitService;
+    private final IChatService chatService;
+    private final IChatLogService chatLogService;
+    private final IVisitService visitService;
     private final ClientIpResolver ipResolver;
 
-    public ChatController(ChatService chatService,
-                          ChatLogService chatLogService,
-                          VisitService visitService,
+    public ChatController(IChatService chatService,
+                          IChatLogService chatLogService,
+                          IVisitService visitService,
                           ClientIpResolver ipResolver) {
         this.chatService = chatService;
         this.chatLogService = chatLogService;
@@ -100,7 +100,7 @@ public class ChatController {
                 isAdmin);
 
         // 一次检索，同时拿到「给前端的引用」和「给 LLM 的原文」
-        RetrievalService.Retrieved retrieved = chatService.retrieve(
+        IRetrievalService.Retrieved retrieved = chatService.retrieve(
                 request.getQuestion(), request.getDocumentIds(), request.getTopK());
         List<SourceRef> sources = retrieved.sources();
         List<Document> context = retrieved.context();
@@ -108,7 +108,7 @@ public class ChatController {
         log.info("问答检索命中 {} 条，ip={}，docIds={}", sources.size(), ip, request.getDocumentIds());
 
         // 先落一行问答记录，拿到 id。这样访客中途关页面时，
-        // 「他问了什么」这条信息也留得下来（见 ChatLogService 类注释）
+        // 「他问了什么」这条信息也留得下来（见 IChatLogService 类注释）
         Long logId = chatLogService.begin(ip, request.getQuestion(), sources, isAdmin);
 
         ChatDoneEvent done = new ChatDoneEvent();
@@ -122,7 +122,7 @@ public class ChatController {
                 .data(sources)
                 .build());
 
-        ChatService.AnswerStream answer = chatService.streamAnswer(request.getQuestion(), context);
+        IChatService.AnswerStream answer = chatService.streamAnswer(request.getQuestion(), context);
         String[] answerModel = new String[1];
         Flux<ServerSentEvent<Object>> tokens = answer.tokens()
                 // 边发边累计，不发完再拼 —— 累计不碰数据库，成本只有一次 append

@@ -1,10 +1,10 @@
 package com.example.kb.controller;
 
 import com.example.kb.common.R;
-import com.example.kb.dto.site.SiteInfo;
+import com.example.kb.domain.vo.SiteInfo;
 import com.example.kb.infrastructure.geo.ClientIpResolver;
-import com.example.kb.service.SiteService;
-import com.example.kb.service.VisitService;
+import com.example.kb.service.ISiteService;
+import com.example.kb.service.IVisitService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -14,19 +14,19 @@ import org.springframework.web.bind.annotation.RestController;
  * 站点公开信息。<b>匿名可访问</b>。
  *
  * <p>这一层只做三件事：取 IP、判断是不是站主、把结果包成 {@link R}。
- * 统计口径、字段组装全在 {@link SiteService} —— 原来这里直接注入 Repository
+ * 统计口径、字段组装全在 {@link ISiteService} —— 原来这里直接注入 Repository
  * 现场拼统计，是越层写法，已重构掉。</p>
  */
 @RestController
 @RequestMapping("/api/site")
 public class SiteController {
 
-    private final SiteService siteService;
-    private final VisitService visitService;
+    private final ISiteService siteService;
+    private final IVisitService visitService;
     private final ClientIpResolver ipResolver;
 
-    public SiteController(SiteService siteService,
-                          VisitService visitService,
+    public SiteController(ISiteService siteService,
+                          IVisitService visitService,
                           ClientIpResolver ipResolver) {
         this.siteService = siteService;
         this.visitService = visitService;

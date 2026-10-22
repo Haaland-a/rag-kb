@@ -1,11 +1,11 @@
 package com.example.kb.controller;
 
 import com.example.kb.common.R;
-import com.example.kb.dto.media.DownloadDto;
-import com.example.kb.dto.media.MediaRequests;
-import com.example.kb.dto.media.PhotoDto;
-import com.example.kb.dto.media.ProjectDto;
-import com.example.kb.service.MediaService;
+import com.example.kb.domain.vo.DownloadDto;
+import com.example.kb.domain.dto.MediaRequests;
+import com.example.kb.domain.vo.PhotoDto;
+import com.example.kb.domain.vo.ProjectDto;
+import com.example.kb.service.IMediaService;
 import jakarta.validation.Valid;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -39,9 +39,9 @@ import java.util.List;
 @RequestMapping("/api/media")
 public class MediaController {
 
-    private final MediaService mediaService;
+    private final IMediaService mediaService;
 
-    public MediaController(MediaService mediaService) {
+    public MediaController(IMediaService mediaService) {
         this.mediaService = mediaService;
     }
 

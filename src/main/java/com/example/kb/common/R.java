@@ -5,7 +5,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 /**
  * 统一响应体。
  *
- * <p>只此一套，前后端联调不许多种分页/包装模型（以前三个项目各写一套、字段名互相打架的坑）。</p>
+ * <p>只此一套，前后端联调不许多种分页/包装模型（haalan 三套并存的坑）。</p>
  *
  * <p>⚠️ {@code data} 字段必须始终序列化（哪怕值是 null）：前端要能稳定地
  * 读 {@code res.data.data} 判断登录状态。如果 Jackson 把 null 键省了，

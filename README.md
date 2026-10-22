@@ -687,21 +687,28 @@ Spring 报 `required a single bean, but 2 were found` 启动直接失败。
 
 ## 七、代码结构
 
-按标准 Spring 分层：**controller → service → repository → domain/dto**，
+按标准 Spring 分层：**controller → service（接口 + Impl）→ mapper（MyBatis-Plus）→ domain（po / dto / vo）**，
 外部依赖（向量库、地理库、解析器、限流、密码散列）收进 `infrastructure`。
+
+> 2026-10 重构过一次：原来是「按功能切包 + 手写 JdbcTemplate + Service 是具体类」，
+> 改成「按层切包 + MyBatis-Plus + Service 先接口后实现」，对齐主流 Spring 业务项目（以及本站作者另一个项目 haalan）的写法。
+> 旧结构不是错的，只是**两个项目两种风格，切换成本比统一成本高**。
 
 ```
 rag-kb/                                  # 仓库根：前后端同一个 git 仓库
 ├── src/main/java/com/example/kb/        # 后端
-│   ├── controller/                      # 8 个：Document / Chat / Auth / Visit / Site / SiteContent / Media / Comment
+│   ├── controller/                      # 9 个：Document / Chat / ChatLog / Auth / Visit / Site / SiteContent / Media / Comment
 │   │   └── 只做「收参数 → 调 Service → 包 R」，不碰 SQL、不拼业务、不返回实体
-│   ├── service/                         # 13 个：文档、索引、问答、检索、引用、认证、访客、站点、内容、资料、动态、留言、模型池
+│   ├── service/                         # 14 个业务接口：IXxxService
+│   │   └── 接口只声明「能做什么」，javadoc 写清约定与坑
+│   ├── service/impl/                    # 14 个实现：@Slf4j @Service + 构造器注入 Mapper
 │   │   └── 流程编排 + 业务规则（限流策略、分页上限、容错口径都在这里）
-│   ├── repository/                      # 10 个：文档/切块/用户/访客/资料/动态/留言/照片/项目/下载，只写 SQL
-│   ├── domain/                          # 10 个实体
-│   │   └── ⚠️ 不出 Service：内部字段（contentHash、passwordHash）无法从类型上泄露
-│   ├── dto/                             # 接口契约，全部 record 或纯 POJO
-│   │   ├── auth/ chat/ comment/ document/ site/ visit/ media/
+│   ├── mapper/                          # 11 个 XxxMapper extends BaseMapper<XxxPo>
+│   │   └── 简单 CRUD 走 Wrapper / 注解；窗口函数、LATERAL JOIN、jsonb 走 XML
+│   ├── domain/
+│   │   ├── po/                          # 11 个数据库行对象，@TableName + Lombok @Data
+│   │   ├── dto/                         # 5 个请求体（AuthDtos / ChatRequest / CommentRequests / MediaRequests / SiteContentRequests）
+│   │   └── vo/                          # 27 个响应体，基本是 record
 │   ├── infrastructure/                  # 11 个：外部依赖适配
 │   │   ├── vectorstore/                 # VectorStoreGateway 封装 PgVectorStore
 │   │   ├── parser/                      # DocumentParser（PDF/MD/TXT）+ Chunker
@@ -712,7 +719,6 @@ rag-kb/                                  # 仓库根：前后端同一个 git �
 │   ├── config/                          # AiConfig / AsyncConfig / WebConfig / StorageConfig
 │   │   ├── AuthInterceptor / AdminInitializer / SiteProperties
 │   │   └── ChatPoolProperties           # 模型池的 rag.chat.pool 绑定
-│   └── common/                          # R 统一响应 + 全局异常
 ├── src/main/resources/
 │   ├── application.yml
 │   ├── db/schema.sql                    # 完整建表（全新安装）
@@ -722,16 +728,18 @@ rag-kb/                                  # 仓库根：前后端同一个 git �
 │   ├── db/migrate-v5-avatar.sql         # 增量：kb_profile.avatar_url
 │   ├── db/migrate-v6-chat-log.sql       # 增量：kb_chat（问答记录）
 │   ├── db/migrate-v7-comments-board.sql # 增量：kb_comment（统表）+ kb_user.device_id
+│   ├── mapper/                          # 3 个 XML：KbChatMapper（LATERAL JOIN）/ KbVisitMapper（array_agg）/ KbProfileMapper（jsonb resultMap）
 │   └── static/                          # 前端构建产物（build 时从 rag-kb-ui/dist 拷进来）
 ├── src/test/java/com/example/kb/        # 单元测试：不连数据库、不调 embedding 模型，毫秒级
-│   └── infrastructure/vectorstore/      # VectorStoreGatewayMetadataTest：metadata 不许有 null
+│   ├── infrastructure/vectorstore/      # VectorStoreGatewayMetadataTest：metadata 不许有 null
+│   └── service/                         # ChatModelPoolTest：轮转均分 / 失败分类 / 冷却长短
 ├── deploy/https/                        # 线上 HTTPS（Let's Encrypt IP 证书 + nginx）
 │   ├── install-https.sh                 # 一键安装，可重复执行（--staging / --dry-run）
 │   ├── renew-cert.sh                    # 续期，cron 每天 03:17 调
 │   ├── nginx.conf                       # 整份替换 /etc/nginx/nginx.conf
 │   ├── rag-kb.conf                      # 站点配置（80 跳 443 + 443 反代 + ACME）
 │   └── nginx-bootstrap.conf             # 只签证书前用（只有 80，其它 503）
-├── docs/screenshots/                    # README 里用的截图
+├── deploy/ram/                          # OSS 最小权限策略与验证
 └── rag-kb-ui/                           # 前端源码（⚠️ 必须入库，理由见下方「为什么要入库」）
     └── src/
         ├── views/HomeView.vue           # 个人主页（首屏/关于我/日常/项目/照片墙/知识库）
@@ -766,18 +774,20 @@ rag-kb/                                  # 仓库根：前后端同一个 git �
 `src/` 下所有 `.vue` / `.js` 必须入库。判断标准很简单 ——
 **能靠 `npm install` + `npm run build` 重新生成的，忽略；不能的，入库。**
 
-### 分层的四条硬规则
+### 分层的六条硬规则
 
-改代码时这四条别破，破了就是下次重构的起点：
+改代码时这六条别破，破了就是下次重构的起点：
 
 | # | 规则 | 为什么 |
 | --- | --- | --- |
-| 1 | Controller 不 import `repository` / `domain` | 一旦 Controller 能直接查库，业务规则就开始往 Controller 里长 |
-| 2 | Controller 的返回值只能是 `R` 包着的 DTO | 实体带内部字段（`contentHash`、`passwordHash`），某次手滑 `R.ok(user)` 就泄露了 |
+| 1 | Controller 不 import `mapper` / `domain.po` | 一旦 Controller 能直接查库，业务规则就开始往 Controller 里长 |
+| 2 | Controller 的返回值只能是 `R` 包着的 VO | PO 带内部字段（`contentHash`、`passwordHash`），某次手滑 `R.ok(user)` 就泄露了 |
 | 3 | Service 不返回 `Map<String,Object>` | 字段名没有编译期检查，前端拼错一个字母就是一片空白 |
-| 4 | Repository 不 import `service` / `controller` | 反向依赖意味着「改 Service 要动 SQL 层」，重构会传染 |
+| 4 | Mapper 不 import `service` / `controller` | 反向依赖意味着「改 Service 要动 SQL 层」，重构会传染 |
+| 5 | 对外只认 `IXxxService` 接口，Controller 不注入 `XxxServiceImpl` | 注入实现类等于把「能不能换实现」这件事废掉了，接口就白拆了 |
+| 6 | 复杂 SQL 写 XML，不硬拼 `LambdaQueryWrapper` | 窗口函数、`LATERAL JOIN`、`<=>`、`ON CONFLICT`、部分索引谓词都表达不出来；硬拼出来的是「能跑但没人看得懂」 |
 
-前三条已用脚本审计过，第 4 条靠代码评审。
+前四条已用脚本审计过，后两条靠代码评审。
 
 ---
 

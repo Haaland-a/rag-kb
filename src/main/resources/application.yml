@@ -6,7 +6,6 @@ server:
   # 限制在这里而不是只靠安全组：安全组是控制台里的状态，换台机器/重建规则就可能忘，
   # 而这一行跟着代码走，改错了 review 时看得见。
   # 万一 nginx 挂了：SSH 上去 `systemctl status nginx`，或者临时把这一行注释掉重启。
-  # 没上 nginx 的纯本机开发想用局域网设备访问时，设环境变量 SERVER_ADDRESS=0.0.0.0。
   address: ${SERVER_ADDRESS:127.0.0.1}
   port: 8080
   # 应用跑在 nginx 反代后面（公网 80/443 → nginx → 127.0.0.1:8080）。
@@ -31,8 +30,6 @@ spring:
   datasource:
     url: ${RAG_DB_URL:jdbc:postgresql://127.0.0.1:5432/rag}
     username: ${RAG_DB_USER:postgres}
-    # ⚠️ 这里的默认值只是本地开发用的，README 里的 docker run 用的也是它。
-    #    生产必须用 RAG_DB_PASSWORD 环境变量覆盖，且别用这种一眼能猜到的密码。
     password: ${RAG_DB_PASSWORD:ragdev}
     driver-class-name: org.postgresql.Driver
     hikari:
@@ -47,6 +44,33 @@ spring:
     multipart:
       max-file-size: 50MB
       max-request-size: 60MB
+
+  # ---------- MyBatis-Plus ----------
+  # mapper XML 放 classpath:mapper/*.xml（resources/mapper/ 下）。
+  # ⚠️ 为什么复杂 SQL 都写 XML 不写 Wrapper：
+  #    本项目用到 ROW_NUMBER() 窗口函数（主页动态的每帖取前 3 条留言）、
+  #    LEFT JOIN LATERAL（问答记录关联最近的访客归属地）、
+  #    pgvector 的 <=> 相似度、ON CONFLICT DO UPDATE（幂等写入）、
+  #    部分索引谓词。这些 Wrapper 表达不了，硬拼只会把 SQL 拆成 Java 字符串，
+  #    比 XML 更难维护，且彻底失去 IDE 的 SQL 高亮与格式化。
+  mybatis-plus:
+    mapper-locations: classpath*:/mapper/**/*.xml
+    type-aliases-package: com.example.kb.domain.po
+    configuration:
+      # 下划线列名 → 驼峰属性名（content_hash → contentHash）
+      map-underscore-to-camel-case: true
+      # 允许返回值为 null 的列（LEFT JOIN 出来的 country/region/city 常年是 null）
+      call-setters-on-nulls: true
+      # 开发期把执行的 SQL 打到日志；生产把下面这行级别调到 info 就不刷屏了
+      log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+    global-config:
+      banner: false
+      db-config:
+        # 主键自增（对应 BIGSERIAL / SERIAL）
+        id-type: auto
+        # 逻辑删除不用 —— 本项目是物理删除，删文档要真把切片和向量一起清掉
+        logic-delete-value: 1
+        logic-not-delete-value: 0
 
   # ---------- Spring AI：阿里云百炼 OpenAI 兼容端点 ----------
   #
@@ -124,14 +148,11 @@ rag:
     #   排除 → qwen-mt-uni（翻译模型，要 input.target_lang，不是聊天模型）
     #
     # 2026-10-22 上线后又发现一个：kimi-k3 不接受 temperature 参数
-    #   '<400> InternalError.Algo.InvalidParameter: Parameter temperature=0.2'
-    #   '... is not supported for kimi-k3 model.'
-    #   → 标 supports-temperature: false。其余 13 个都接受 temperature。
+    #   "<400> InternalError.Algo.InvalidParameter: Parameter 'temperature'=0.2
+    #    is not supported for kimi-k3 model."
+    #   → 标 supports-temperature: false。其余 13 个都接受 temperature:0.2。
     #   ⚠️ 这个坑只有在真实请求带 temperature 时才暴露，单测和启动都发现不了，
     #   上线后要盯一眼 GET /api/chat/models 里 kimi-k3 的 failCount。
-    #
-    # 换成别的服务商时，把模型名换成那家的即可；留空则退回单模型
-    # （用 spring.ai.openai.chat.options.model 指定的那个）。
     pool:
       models:
         - name: qwen3.8-flash
@@ -213,8 +234,6 @@ rag:
   #    进 git 之前一定要清掉。启动时 AdminInitializer 会按这里的值对齐库里的密码。
   admin:
     username: ${RAG_ADMIN_USERNAME:demo}
-    # 显示名（主页/留言区里出现），留空就用 username
-    display-name: ${RAG_ADMIN_DISPLAY_NAME:}
     password: ${RAG_ADMIN_PASSWORD:}
 
   # ---------- 文件存储（照片墙 / 项目截图 / 简历） ----------

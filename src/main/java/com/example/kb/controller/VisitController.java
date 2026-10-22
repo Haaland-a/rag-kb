@@ -1,10 +1,10 @@
 package com.example.kb.controller;
 
 import com.example.kb.common.R;
-import com.example.kb.dto.visit.VisitPage;
-import com.example.kb.dto.visit.VisitStats;
-import com.example.kb.dto.visit.VisitorSummary;
-import com.example.kb.service.VisitService;
+import com.example.kb.domain.vo.VisitPage;
+import com.example.kb.domain.vo.VisitStats;
+import com.example.kb.domain.vo.VisitorSummary;
+import com.example.kb.service.IVisitService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -23,16 +23,16 @@ import java.util.List;
  * </ul>
  *
  * <p>⚠️ 这一层<b>不注入 Repository</b>：分页上限、聚合口径、容错策略都在
- * {@link VisitService}。重构前这里是 Controller 直连 {@code VisitRepository}
+ * {@link IVisitService}。重构前这里是 Controller 直连 {@code KbVisitMapper}
  * 并现场 {@code Map.of(...)}，属于越层 + 弱类型，现已改正。</p>
  */
 @RestController
 @RequestMapping("/api/visit")
 public class VisitController {
 
-    private final VisitService visitService;
+    private final IVisitService visitService;
 
-    public VisitController(VisitService visitService) {
+    public VisitController(IVisitService visitService) {
         this.visitService = visitService;
     }
 

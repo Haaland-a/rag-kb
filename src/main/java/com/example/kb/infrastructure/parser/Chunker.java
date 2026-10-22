@@ -1,6 +1,6 @@
 package com.example.kb.infrastructure.parser;
 
-import com.example.kb.domain.KbChunk;
+import com.example.kb.domain.po.KbChunk;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.reader.pdf.PagePdfDocumentReader;
 import org.springframework.beans.factory.annotation.Value;

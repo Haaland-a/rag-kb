@@ -1,9 +1,9 @@
 package com.example.kb.controller;
 
 import com.example.kb.common.R;
-import com.example.kb.dto.chat.ChatLogDetailDto;
-import com.example.kb.dto.chat.ChatPage;
-import com.example.kb.service.ChatLogService;
+import com.example.kb.domain.vo.ChatLogDetailDto;
+import com.example.kb.domain.vo.ChatPage;
+import com.example.kb.service.IChatLogService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -29,9 +29,9 @@ public class ChatLogController {
 
     private static final int DEFAULT_LIMIT = 20;
 
-    private final ChatLogService chatLogService;
+    private final IChatLogService chatLogService;
 
-    public ChatLogController(ChatLogService chatLogService) {
+    public ChatLogController(IChatLogService chatLogService) {
         this.chatLogService = chatLogService;
     }
 

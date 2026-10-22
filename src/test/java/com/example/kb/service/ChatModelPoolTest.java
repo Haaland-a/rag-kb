@@ -1,6 +1,7 @@
 package com.example.kb.service;
 
 import com.example.kb.config.ChatPoolProperties;
+import com.example.kb.service.impl.ChatModelPoolImpl;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -28,7 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *       冷却 5 分钟，5 分钟后又去撞同一个用光的模型，用户反复失败。</li>
  * </ol>
  *
- * <p>不启 Spring 上下文、不发网络请求：用反射构造 {@link ChatModelPool}，
+ * <p>不启 Spring 上下文、不发网络请求：用反射构造 {@link ChatModelPoolImpl}，
  * 直接喂异常对象验证分类结果。</p>
  */
 class ChatModelPoolTest {
@@ -42,8 +43,8 @@ class ChatModelPoolTest {
      * 再手工填 {@code slots} / {@code properties} / {@code cursor} 三个字段
      * —— 被测的 {@code order()} 与 {@code classify()} 只依赖这三个。</p>
      */
-    private static ChatModelPool newPool(String... modelNames) throws Exception {
-        ChatModelPool pool = (ChatModelPool) unsafe().allocateInstance(ChatModelPool.class);
+    private static ChatModelPoolImpl newPool(String... modelNames) throws Exception {
+        ChatModelPoolImpl pool = (ChatModelPoolImpl) unsafe().allocateInstance(ChatModelPoolImpl.class);
 
         Map<String, Object> slots = new LinkedHashMap<>();
         set(pool, "slots", slots);
@@ -51,7 +52,7 @@ class ChatModelPoolTest {
         set(pool, "cursor", new AtomicInteger());
 
         Class<?> modelCls = Class.forName("com.example.kb.config.ChatPoolProperties$Model");
-        Class<?> slotCls = Class.forName("com.example.kb.service.ChatModelPool$Slot");
+        Class<?> slotCls = Class.forName("com.example.kb.service.impl.ChatModelPoolImpl$Slot");
         Constructor<?> modelCtor = modelCls.getDeclaredConstructor();
         Constructor<?> slotCtor = slotCls.getDeclaredConstructor(modelCls, boolean.class);
         modelCtor.setAccessible(true);
@@ -73,7 +74,7 @@ class ChatModelPoolTest {
     }
 
     private static void set(Object target, String name, Object value) throws Exception {
-        Field f = ChatModelPool.class.getDeclaredField(name);
+        Field f = ChatModelPoolImpl.class.getDeclaredField(name);
         f.setAccessible(true);
         f.set(target, value);
     }
@@ -81,7 +82,7 @@ class ChatModelPoolTest {
     @Test
     @DisplayName("轮转：连续调用 6 次，每个模型都当过 2 次第一")
     void rotationIsEven() throws Exception {
-        ChatModelPool pool = newPool("a", "b", "c");
+        ChatModelPoolImpl pool = newPool("a", "b", "c");
 
         List<String> firsts = new ArrayList<>();
         for (int i = 0; i < 6; i++) {
@@ -97,7 +98,7 @@ class ChatModelPoolTest {
     @Test
     @DisplayName("轮转：每次返回的都是全集，只是顺序不同")
     void orderAlwaysContainsAll() throws Exception {
-        ChatModelPool pool = newPool("a", "b", "c");
+        ChatModelPoolImpl pool = newPool("a", "b", "c");
         for (int i = 0; i < 4; i++) {
             List<String> order = pool.order();
             assertEquals(3, order.size());
@@ -108,7 +109,7 @@ class ChatModelPoolTest {
     @Test
     @DisplayName("分类：403 额度报文 → QUOTA")
     void classifyQuota() throws Exception {
-        Method m = ChatModelPool.class.getDeclaredMethod("classify", Throwable.class);
+        Method m = ChatModelPoolImpl.class.getDeclaredMethod("classify", Throwable.class);
         m.setAccessible(true);
 
         RuntimeException real = new RuntimeException(
@@ -125,7 +126,7 @@ class ChatModelPoolTest {
     @Test
     @DisplayName("分类：429 → RATE_LIMIT；模型名写错 → OTHER")
     void classifyOthers() throws Exception {
-        Method m = ChatModelPool.class.getDeclaredMethod("classify", Throwable.class);
+        Method m = ChatModelPoolImpl.class.getDeclaredMethod("classify", Throwable.class);
         m.setAccessible(true);
 
         assertEquals("RATE_LIMIT", m.invoke(null,
@@ -137,7 +138,7 @@ class ChatModelPoolTest {
     @Test
     @DisplayName("失败上报后该模型进入冷却，order 里排到最后；恢复后回到池中")
     void failedModelGoesToBack() throws Exception {
-        ChatModelPool pool = newPool("a", "b");
+        ChatModelPoolImpl pool = newPool("a", "b");
 
         pool.reportFailure("a", new RuntimeException("boom"));
         assertEquals("b", pool.order().get(0), "a 冷却后 b 应该排第一");
@@ -149,7 +150,7 @@ class ChatModelPoolTest {
     @Test
     @DisplayName("额度耗尽的冷却时间远长于一般错误")
     void quotaCooldownLongerThanError() throws Exception {
-        ChatModelPool pool = newPool("q", "e");
+        ChatModelPoolImpl pool = newPool("q", "e");
         ChatPoolProperties props = new ChatPoolProperties();
 
         pool.reportFailure("q", new RuntimeException("AllocationQuota.FreeTierOnly"));
@@ -170,7 +171,7 @@ class ChatModelPoolTest {
         // 报文 "Parameter 'temperature'=0.2 is not supported for kimi-k3 model."
         // 它不是配额问题也不是限流，只能归 OTHER（冷却 5 分钟）。真正的修法是
         // 在 rag.chat.pool.models 里给它标 supports-temperature: false，别再发这个参数。
-        Method classify = ChatModelPool.class.getDeclaredMethod("classify", Throwable.class);
+        Method classify = ChatModelPoolImpl.class.getDeclaredMethod("classify", Throwable.class);
         classify.setAccessible(true);
         Object kind = classify.invoke(null, new RuntimeException(
                 "<400> InternalError.Algo.InvalidParameter: Parameter 'temperature'=0.2 "

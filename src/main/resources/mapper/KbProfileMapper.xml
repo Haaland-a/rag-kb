@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+  kb_profile 单行表的整行写入。
+
+  ⚠️ 用 ON CONFLICT (id) DO UPDATE 而不是「先查再决定 insert/update」：
+  后者有竞态（两个请求同时发现不存在，都去 insert，第二个撞主键）。
+  虽然这个站只有站主一个人会点保存，写对了不花钱。
+
+  ⚠️ 三个 jsonb 列必须走实体上挂的 TypeHandler（typeHandler 已在
+  KbProfile 的 @TableField 里声明），这里不要写成 ::jsonb 强转 ——
+  MyBatis 的 TypeHandler 写出来已经是 PGobject，再 ::jsonb 会报
+  「cannot cast jsonb to jsonb」这类奇怪错误。
+-->
+<mapper namespace="com.example.kb.mapper.KbProfileMapper">
+
+  <!--
+    resultMap 必须显式声明三个 jsonb 列的 TypeHandler。
+    ⚠️ 实体上的 autoResultMap = true 只对 BaseMapper 自带方法生效，
+    自定义语句走 resultMap 才认 typeHandler；不写这段，读回来的
+    about/links/tags 会是 PGobject，映射到 List 失败后变空数组。
+  -->
+  <resultMap id="profileMap" type="com.example.kb.domain.po.KbProfile">
+    <id column="id" property="id"/>
+    <result column="owner" property="owner"/>
+    <result column="avatar_text" property="avatarText"/>
+    <result column="avatar_url" property="avatarUrl"/>
+    <result column="tagline" property="tagline"/>
+    <result column="intro" property="intro"/>
+    <result column="about" property="about"
+            typeHandler="com.example.kb.common.mybatis.StringListJsonbTypeHandler"/>
+    <result column="links" property="links"
+            typeHandler="com.example.kb.common.mybatis.LinkListJsonbTypeHandler"/>
+    <result column="tags" property="tags"
+            typeHandler="com.example.kb.common.mybatis.StringListJsonbTypeHandler"/>
+    <result column="updated_at" property="updatedAt"/>
+  </resultMap>
+
+  <select id="selectSingleton" resultMap="profileMap">
+    SELECT id, owner, avatar_text, avatar_url, tagline, intro,
+           about, links, tags, updated_at
+    FROM kb_profile WHERE id = 1
+  </select>
+
+    <insert id="saveSingleton"
+            parameterType="com.example.kb.domain.po.KbProfile">
+        INSERT INTO kb_profile (id, owner, avatar_text, avatar_url, tagline, intro,
+                                about, links, tags, updated_at)
+        VALUES (1, #{owner}, #{avatarText}, #{avatarUrl}, #{tagline}, #{intro},
+                #{about, typeHandler=com.example.kb.common.mybatis.StringListJsonbTypeHandler},
+                #{links, typeHandler=com.example.kb.common.mybatis.LinkListJsonbTypeHandler},
+                #{tags,  typeHandler=com.example.kb.common.mybatis.StringListJsonbTypeHandler},
+                now())
+        ON CONFLICT (id) DO UPDATE
+        SET owner       = EXCLUDED.owner,
+            avatar_text = EXCLUDED.avatar_text,
+            avatar_url  = EXCLUDED.avatar_url,
+            tagline     = EXCLUDED.tagline,
+            intro       = EXCLUDED.intro,
+            about       = EXCLUDED.about,
+            links       = EXCLUDED.links,
+            tags        = EXCLUDED.tags,
+            updated_at  = now()
+    </insert>
+</mapper>

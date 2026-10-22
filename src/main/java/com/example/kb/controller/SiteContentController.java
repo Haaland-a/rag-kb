@@ -1,21 +1,21 @@
 package com.example.kb.controller;
 
 import com.example.kb.common.R;
-import com.example.kb.dto.comment.CommentDto;
-import com.example.kb.dto.comment.CommentPage;
-import com.example.kb.dto.comment.CommentRequests;
-import com.example.kb.dto.media.MomentDetail;
-import com.example.kb.dto.media.MomentDto;
-import com.example.kb.dto.media.MomentPage;
-import com.example.kb.dto.media.SiteContentRequests;
-import com.example.kb.dto.site.ProfileDto;
+import com.example.kb.domain.vo.CommentDto;
+import com.example.kb.domain.vo.CommentPage;
+import com.example.kb.domain.dto.CommentRequests;
+import com.example.kb.domain.vo.MomentDetail;
+import com.example.kb.domain.vo.MomentDto;
+import com.example.kb.domain.vo.MomentPage;
+import com.example.kb.domain.dto.SiteContentRequests;
+import com.example.kb.domain.vo.ProfileDto;
 import com.example.kb.infrastructure.geo.ClientIpResolver;
-import com.example.kb.repository.KbCommentRepository;
-import com.example.kb.service.CommentService;
-import com.example.kb.service.MediaService;
-import com.example.kb.service.MomentService;
-import com.example.kb.service.ProfileService;
-import com.example.kb.service.VisitService;
+import com.example.kb.mapper.KbCommentMapper;
+import com.example.kb.service.ICommentService;
+import com.example.kb.service.IMediaService;
+import com.example.kb.service.IMomentService;
+import com.example.kb.service.IProfileService;
+import com.example.kb.service.IVisitService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
@@ -65,18 +65,18 @@ public class SiteContentController {
     /** 动态列表默认分页 */
     private static final int DEFAULT_LIMIT = 20;
 
-    private final ProfileService profileService;
-    private final MomentService momentService;
-    private final MediaService mediaService;
-    private final CommentService commentService;
-    private final VisitService visitService;
+    private final IProfileService profileService;
+    private final IMomentService momentService;
+    private final IMediaService mediaService;
+    private final ICommentService commentService;
+    private final IVisitService visitService;
     private final ClientIpResolver ipResolver;
 
-    public SiteContentController(ProfileService profileService,
-                                 MomentService momentService,
-                                 MediaService mediaService,
-                                 CommentService commentService,
-                                 VisitService visitService,
+    public SiteContentController(IProfileService profileService,
+                                 IMomentService momentService,
+                                 IMediaService mediaService,
+                                 ICommentService commentService,
+                                 IVisitService visitService,
                                  ClientIpResolver ipResolver) {
         this.profileService = profileService;
         this.momentService = momentService;
@@ -103,9 +103,9 @@ public class SiteContentController {
     public R saveProfile(@Valid @RequestBody SiteContentRequests.ProfileSave req,
                          HttpServletRequest request) {
         requireAdmin(request);
-        List<ProfileService.LinkInputLike> links = req.getLinks() == null ? List.of()
+        List<IProfileService.LinkInputLike> links = req.getLinks() == null ? List.of()
                 : req.getLinks().stream()
-                        .map(l -> new ProfileService.LinkInputLike(l.getLabel(), l.getUrl()))
+                        .map(l -> new IProfileService.LinkInputLike(l.getLabel(), l.getUrl()))
                         .toList();
         ProfileDto saved = profileService.save(req.getOwner(), req.getAvatarText(),
                 req.getAvatarUrl(), req.getTagline(), req.getIntro(), req.getAbout(),
@@ -182,7 +182,7 @@ public class SiteContentController {
      *
      * <p>⚠️ 这个端点保留只为兼容旧前端，真正的实现已统一到
      * {@link CommentController} 的 {@code POST /api/comments/public/moments/{id}}。
-     * 两边都走 {@link CommentService#submit}，可见性/屏蔽/昵称覆盖的规则只有一份。</p>
+     * 两边都走 {@link ICommentService#submit}，可见性/屏蔽/昵称覆盖的规则只有一份。</p>
      *
      * @deprecated 用 {@code POST /api/comments/public/moments/{id}}
      */
@@ -193,7 +193,7 @@ public class SiteContentController {
                         HttpServletRequest request) {
         String ip = ipResolver.resolve(request, visitService.isTrustProxy());
         Long viewerId = viewerId(request);
-        CommentService.SubmitResult result = commentService.submit(id, req, viewerId, username(request), ip);
+        ICommentService.SubmitResult result = commentService.submit(id, req, viewerId, username(request), ip);
         return R.ok(java.util.Map.of("notice", result.notice()));
     }
 
@@ -220,7 +220,7 @@ public class SiteContentController {
     @PostMapping("/moments/upload")
     public R upload(@RequestPart("file") MultipartFile file, HttpServletRequest request) {
         requireAdmin(request);
-        MomentService.UploadedMedia media = momentService.uploadMedia(file);
+        IMomentService.UploadedMedia media = momentService.uploadMedia(file);
         return R.ok(media);
     }
 
@@ -267,7 +267,7 @@ public class SiteContentController {
     // ⚠️ 这一组三个端点是早期实现留下的，功能已经被 CommentController 覆盖
     //   （GET /api/comments、GET /api/comments/unread、POST /api/comments/read）。
     //   之所以不直接删：前端还有两处在调，删掉要么同步改前端要么留个 404 坑。
-    //   处理方式是「保留路径 + 全部转调 CommentService」——
+    //   处理方式是「保留路径 + 全部转调 ICommentService」——
     //   两条路径共用一份实现，就不存在「改了一处忘另一处」的漂移。
 
     /**
@@ -297,7 +297,7 @@ public class SiteContentController {
         requireAdmin(request);
         CommentPage page = commentService.adminList(
                 limit <= 0 ? DEFAULT_LIMIT : limit, offset, unreadOnly,
-                KbCommentRepository.SCOPE_MOMENT);
+                KbCommentMapper.SCOPE_MOMENT);
         return R.ok(page);
     }
 

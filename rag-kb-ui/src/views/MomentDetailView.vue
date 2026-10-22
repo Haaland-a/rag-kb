@@ -207,7 +207,7 @@ import { getDeviceId } from '@/utils/device'
 const auth = useAuthStore()
 const route = useRoute()
 
-const title = ref('Haalan')
+const title = ref('Demo')
 const loading = ref(true)
 /** 动态本体；null = 不存在/被隐藏/已删（三种情况后端统一 404，这里也统一一个空态） */
 const moment = ref(null)

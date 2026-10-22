@@ -1,7 +1,7 @@
 package com.example.kb.infrastructure.geo;
 
-import com.example.kb.domain.KbVisit;
-import com.example.kb.repository.VisitRepository;
+import com.example.kb.domain.po.KbVisit;
+import com.example.kb.mapper.KbVisitMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URI;
@@ -45,12 +45,12 @@ public class GeoIpService {
     /** 单次请求超时。归属地是「锦上添花」，不值得为它等 5 秒 */
     private static final Duration TIMEOUT = Duration.ofSeconds(4);
 
-    private final VisitRepository visitRepository;
+    private final KbVisitMapper visitMapper;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
 
-    public GeoIpService(VisitRepository visitRepository, ObjectMapper objectMapper) {
-        this.visitRepository = visitRepository;
+    public GeoIpService(KbVisitMapper visitMapper, ObjectMapper objectMapper) {
+        this.visitMapper = visitMapper;
         this.objectMapper = objectMapper;
         // ⚠️ 必须显式设 connectTimeout：默认是无限等待，DNS 卡住会占死线程
         this.httpClient = HttpClient.newBuilder()
@@ -68,7 +68,7 @@ public class GeoIpService {
     @Scheduled(fixedDelayString = "${rag.visit.geo-delay-ms:60000}",
             initialDelayString = "${rag.visit.geo-initial-delay-ms:20000}")
     public void enrichPending() {
-        List<KbVisit> pending = visitRepository.findPendingGeo(BATCH);
+        List<KbVisit> pending = visitMapper.findPendingGeo(BATCH);
         if (pending.isEmpty()) {
             return;
         }
@@ -77,9 +77,9 @@ public class GeoIpService {
         for (KbVisit visit : pending) {
             Geo geo = lookup(visit.getIp());
             if (geo == null) {
-                visitRepository.markGeoFailed(visit.getId());
+                visitMapper.markGeoFailed(visit.getId());
             } else {
-                visitRepository.updateGeo(visit.getId(), geo.country, geo.region, geo.city, geo.isp);
+                visitMapper.updateGeo(visit.getId(), geo.country, geo.region, geo.city, geo.isp);
                 ok++;
             }
         }

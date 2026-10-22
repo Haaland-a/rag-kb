@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+  kb_chat 的两个查询要 LEFT JOIN LATERAL（PG 独有语法），注解里写不动，
+  所以放 XML。
+
+  ⚠️ 归属地必须用 LATERAL 逐行取「同 IP 最近一条 DONE 的访问记录」：
+  写成普通 JOIN 会一对多把行数放大（同一个 IP 访问过 50 次，问答记录就变 50 行）；
+  写成子查询 + IN 会退化成 N 次往返。
+-->
+<mapper namespace="com.example.kb.mapper.KbChatMapper">
+
+    <resultMap id="chatWithLocationMap"
+               type="com.example.kb.mapper.KbChatMapper$ChatWithLocation">
+        <id property="id" column="id"/>
+        <result property="ip" column="ip"/>
+        <result property="question" column="question"/>
+        <result property="answer" column="answer"/>
+        <result property="sources" column="sources"/>
+        <result property="sourceCount" column="source_count"/>
+        <result property="elapsedMs" column="elapsed_ms"/>
+        <result property="answerChars" column="answer_chars"/>
+        <result property="complete" column="complete"/>
+        <result property="admin" column="is_admin"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="country" column="country"/>
+        <result property="region" column="region"/>
+        <result property="city" column="city"/>
+    </resultMap>
+
+    <sql id="chatColumns">
+        c.id, c.ip, c.question, c.answer, c.sources, c.source_count,
+        c.elapsed_ms, c.answer_chars, c.complete, c.is_admin, c.created_at,
+        g.country, g.region, g.city
+    </sql>
+
+    <sql id="locationJoin">
+        LEFT JOIN LATERAL (
+            SELECT v.country, v.region, v.city
+            FROM kb_visit v
+            WHERE v.ip = c.ip AND v.geo_status = 'DONE'
+            ORDER BY v.created_at DESC
+            LIMIT 1
+        ) g ON true
+    </sql>
+
+    <select id="selectRecentWithLocation" resultMap="chatWithLocationMap">
+        SELECT <include refid="chatColumns"/>
+        FROM kb_chat c
+        <include refid="locationJoin"/>
+        <where>
+            <if test="onlyVisitor">c.is_admin = FALSE</if>
+        </where>
+        ORDER BY c.created_at DESC, c.id DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="selectOneWithLocation" resultMap="chatWithLocationMap">
+        SELECT <include refid="chatColumns"/>
+        FROM kb_chat c
+        <include refid="locationJoin"/>
+        WHERE c.id = #{id}
+    </select>
+</mapper>

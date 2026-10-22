@@ -2,14 +2,14 @@ package com.example.kb.controller;
 
 import com.example.kb.common.R;
 import com.example.kb.config.AuthInterceptor;
-import com.example.kb.dto.auth.AuthDtos.ChangePasswordRequest;
-import com.example.kb.dto.auth.AuthDtos.LoginRequest;
-import com.example.kb.dto.auth.AuthDtos.LoginResponse;
-import com.example.kb.dto.auth.AuthDtos.RegisterRequest;
-import com.example.kb.dto.auth.AuthDtos.UserInfo;
+import com.example.kb.domain.dto.AuthDtos.ChangePasswordRequest;
+import com.example.kb.domain.dto.AuthDtos.LoginRequest;
+import com.example.kb.domain.dto.AuthDtos.LoginResponse;
+import com.example.kb.domain.dto.AuthDtos.RegisterRequest;
+import com.example.kb.domain.dto.AuthDtos.UserInfo;
 import com.example.kb.infrastructure.geo.ClientIpResolver;
-import com.example.kb.service.AuthService;
-import com.example.kb.service.VisitService;
+import com.example.kb.service.IAuthService;
+import com.example.kb.service.IVisitService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.util.Optional;
@@ -41,13 +41,13 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/auth")
 public class AuthController {
 
-    private final AuthService authService;
+    private final IAuthService authService;
     private final ClientIpResolver ipResolver;
-    private final VisitService visitService;
+    private final IVisitService visitService;
 
-    public AuthController(AuthService authService,
+    public AuthController(IAuthService authService,
                           ClientIpResolver ipResolver,
-                          VisitService visitService) {
+                          IVisitService visitService) {
         this.authService = authService;
         this.ipResolver = ipResolver;
         this.visitService = visitService;
@@ -68,7 +68,7 @@ public class AuthController {
      */
     @PostMapping("/login")
     public R login(@Valid @RequestBody LoginRequest request) {
-        AuthService.LoginSuccess success = authService
+        IAuthService.LoginSuccess success = authService
                 .authenticate(request.getUsername(), request.getPassword())
                 .orElseThrow(() -> new IllegalArgumentException("用户名或密码错误"));
         return R.ok(toLoginResponse(success));
@@ -97,7 +97,7 @@ public class AuthController {
         long id = authService.register(body.getUsername(), body.getPassword(),
                 body.getDisplayName(), body.getDeviceId(), ip);
         // 注册完直接登录，省用户再输一遍
-        AuthService.LoginSuccess success = authService
+        IAuthService.LoginSuccess success = authService
                 .authenticate(body.getUsername(), body.getPassword())
                 .orElseThrow(() -> new IllegalStateException("注册成功但自动登录失败，请手动登录"));
         return R.ok(toLoginResponse(success, id));
@@ -110,11 +110,11 @@ public class AuthController {
      * Service 的 record 是内部类型，直接返回等于把内部结构当接口契约，
      * 将来加字段会连带改前端。</p>
      */
-    private static LoginResponse toLoginResponse(AuthService.LoginSuccess s) {
+    private static LoginResponse toLoginResponse(IAuthService.LoginSuccess s) {
         return toLoginResponse(s, s.userId());
     }
 
-    private static LoginResponse toLoginResponse(AuthService.LoginSuccess s, long userId) {
+    private static LoginResponse toLoginResponse(IAuthService.LoginSuccess s, long userId) {
         LoginResponse resp = new LoginResponse();
         resp.setToken(s.token());
         resp.setUserId(userId);

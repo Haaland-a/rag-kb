@@ -1,6 +1,6 @@
 package com.example.kb.infrastructure.security;
 
-import com.example.kb.domain.KbUser;
+import com.example.kb.domain.po.KbUser;
 import org.springframework.stereotype.Component;
 
 import java.security.SecureRandom;

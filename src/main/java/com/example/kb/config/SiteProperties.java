@@ -21,7 +21,7 @@ import java.util.List;
 public class SiteProperties {
 
     /** 站名，显示在浏览器标题和页脚 */
-    private String title = "Demo";
+    private String title = "Demo Site";
 
     /** 站主名字，主页大标题 */
     private String owner = "Demo";

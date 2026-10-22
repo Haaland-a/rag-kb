@@ -20,6 +20,7 @@
     <properties>
         <java.version>17</java.version>
         <spring-ai.version>1.1.8</spring-ai.version>
+        <mybatis-plus.version>3.5.10.1</mybatis-plus.version>
     </properties>
 
     <dependencyManagement>
@@ -105,6 +106,18 @@
           Tika：MD/TXT/HTML 的兜底解析。
           当前 MD/TXT 自己按行读就够，先不引（2C2G 内存预算 + 少一个依赖少一个坑）。
         -->
+
+        <!--
+          MyBatis-Plus：mapper 层。
+          ⚠️ 复杂 SQL（窗口函数 ROW_NUMBER、LATERAL JOIN、pgvector <=> 相似度、
+          ON CONFLICT 幂等写入）一律走 resources/mapper/*.xml，不用 LambdaWrapper 硬拼 ——
+          这些写法 Wrapper 表达不了，硬拼会把 SQL 拆成代码，反而更难维护。
+        -->
+        <dependency>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+            <version>${mybatis-plus.version}</version>
+        </dependency>
 
         <!-- Actuator：2C2G 上只开 health，方便探活 -->
         <dependency>

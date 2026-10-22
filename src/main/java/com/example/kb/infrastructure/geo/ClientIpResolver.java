@@ -17,7 +17,7 @@ import org.springframework.stereotype.Component;
  * <p>⚠️ <b>安全提醒</b>：{@code X-Forwarded-For} 是客户端可伪造的请求头，
  * 只有在可信代理后面才能信它。</p>
  *
- * <p>当前部署是 <b>nginx 反代</b>：公网 80/443 → nginx →
+ * <p>当前部署（自 2026-10 起）是 <b>nginx 反代</b>：公网 80/443 → nginx →
  * {@code 127.0.0.1:8080}。nginx 配置里把 XFF 写成
  * {@code proxy_set_header X-Forwarded-For $remote_addr}（<b>覆盖</b>而不是
  * {@code $proxy_add_x_forwarded_for} 追加），因此到达这里的 XFF 一定是

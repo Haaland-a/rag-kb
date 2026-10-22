@@ -1,9 +1,9 @@
 package com.example.kb.controller;
 
 import com.example.kb.common.R;
-import com.example.kb.dto.document.ChunkPage;
-import com.example.kb.dto.document.DocumentDto;
-import com.example.kb.service.DocumentService;
+import com.example.kb.domain.vo.ChunkPage;
+import com.example.kb.domain.vo.DocumentDto;
+import com.example.kb.service.IDocumentService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -39,9 +39,9 @@ public class DocumentController {
 
     /** 上传落盘目录，可用 rag.upload-dir 覆盖（容器里要挂卷） */
     private final Path uploadDir;
-    private final DocumentService documentService;
+    private final IDocumentService documentService;
 
-    public DocumentController(DocumentService documentService,
+    public DocumentController(IDocumentService documentService,
                               @Value("${rag.upload-dir:${java.io.tmpdir}/rag-kb-uploads}") String uploadDir) {
         this.documentService = documentService;
         this.uploadDir = Path.of(uploadDir);
@@ -74,7 +74,7 @@ public class DocumentController {
      * 前端直接就能用，不用再等一次索引）。</p>
      *
      * <p>⚠️ 落盘到 uploadDir 而不是 /tmp：容器里 /tmp 不挂卷，重启丢文件；
-     * 异步索引线程要读这个文件，必须活到索引完成（IndexingService 负责删）。</p>
+     * 异步索引线程要读这个文件，必须活到索引完成（IIndexingService 负责删）。</p>
      */
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public R upload(@RequestParam("file") MultipartFile file) throws IOException {

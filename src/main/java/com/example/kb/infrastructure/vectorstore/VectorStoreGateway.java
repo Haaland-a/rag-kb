@@ -1,6 +1,6 @@
 package com.example.kb.infrastructure.vectorstore;
 
-import com.example.kb.domain.KbChunk;
+import com.example.kb.domain.po.KbChunk;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
@@ -137,8 +137,8 @@ public class VectorStoreGateway {
         //    headingPath 恒为 null；TXT 根本没有 heading_path；pageNumber 在 reader
         //    没给页码时也是 null。所以这里必须「有值才放」。
         //
-        //    少放字段不影响溯源：CitationResolver 发现 metadata 缺字段时会回查
-        //    kb_chunk 补上（见 CitationResolver.toSourceRef 的兜底分支）。
+        //    少放字段不影响溯源：ICitationResolver 发现 metadata 缺字段时会回查
+        //    kb_chunk 补上（见 ICitationResolver.toSourceRef 的兜底分支）。
         Map<String, Object> metadata = new HashMap<>();
         putIfNotNull(metadata, META_CHUNK_ID, chunk.getId());
         putIfNotNull(metadata, META_DOCUMENT_ID, chunk.getDocumentId());

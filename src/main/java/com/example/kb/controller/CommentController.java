@@ -1,11 +1,11 @@
 package com.example.kb.controller;
 
 import com.example.kb.common.R;
-import com.example.kb.dto.comment.CommentDto;
-import com.example.kb.dto.comment.CommentRequests;
+import com.example.kb.domain.vo.CommentDto;
+import com.example.kb.domain.dto.CommentRequests;
 import com.example.kb.infrastructure.geo.ClientIpResolver;
-import com.example.kb.service.CommentService;
-import com.example.kb.service.VisitService;
+import com.example.kb.service.ICommentService;
+import com.example.kb.service.IVisitService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.util.List;
@@ -55,13 +55,13 @@ import org.springframework.web.server.ResponseStatusException;
 @RequestMapping("/api/comments")
 public class CommentController {
 
-    private final CommentService commentService;
+    private final ICommentService commentService;
     private final ClientIpResolver ipResolver;
-    private final VisitService visitService;
+    private final IVisitService visitService;
 
-    public CommentController(CommentService commentService,
+    public CommentController(ICommentService commentService,
                              ClientIpResolver ipResolver,
-                             VisitService visitService) {
+                             IVisitService visitService) {
         this.commentService = commentService;
         this.ipResolver = ipResolver;
         this.visitService = visitService;
@@ -173,7 +173,7 @@ public class CommentController {
 
     // ==================== 内部 ====================
 
-    private CommentService.SubmitResult doSubmit(Long momentId, HttpServletRequest request,
+    private ICommentService.SubmitResult doSubmit(Long momentId, HttpServletRequest request,
                                                  CommentRequests.Submit body) {
         String ip = ipResolver.resolve(request, visitService.isTrustProxy());
         return commentService.submit(momentId, body,

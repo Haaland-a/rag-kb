@@ -15,7 +15,7 @@ import org.springframework.web.servlet.HandlerInterceptor;
  * <p>这个站的语义和普通后台不一样：</p>
  * <ul>
  *   <li><b>游客</b>（任何人）能看主页、能问 AI —— 不需要登录</li>
- *   <li><b>站主</b>（只有一个管理员账号，见 {@code rag.admin.username}）登录后才能上传/删除文档、看访客日志</li>
+ *   <li><b>站主</b>（只有一个账号 haaland）登录后才能上传/删除文档、看访客日志</li>
  * </ul>
  *
  * <p>所以策略是「先认人，再按路径判权」，而不是「没 token 一律 401」：</p>

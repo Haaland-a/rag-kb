@@ -1,6 +1,6 @@
 package com.example.kb.infrastructure.vectorstore;
 
-import com.example.kb.domain.KbChunk;
+import com.example.kb.domain.po.KbChunk;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.document.Document;
