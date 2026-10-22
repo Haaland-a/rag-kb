@@ -691,7 +691,7 @@ Spring 报 `required a single bean, but 2 were found` 启动直接失败。
 外部依赖（向量库、地理库、解析器、限流、密码散列）收进 `infrastructure`。
 
 > 2026-10 重构过一次：原来是「按功能切包 + 手写 JdbcTemplate + Service 是具体类」，
-> 改成「按层切包 + MyBatis-Plus + Service 先接口后实现」，对齐主流 Spring 业务项目（以及本站作者另一个项目 haalan）的写法。
+> 改成「按层切包 + MyBatis-Plus + Service 先接口后实现」，对齐主流 Spring 业务项目的写法。
 > 旧结构不是错的，只是**两个项目两种风格，切换成本比统一成本高**。
 
 ```
