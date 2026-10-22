@@ -50,7 +50,10 @@ public record CommentDto(
      * @param userId   注册用户 id；null = 游客
      * @param username 登录名；游客为 null
      * @param registered 是否注册用户 —— 前端据此显示「注册用户」标签
+     * @param admin    是不是站主。站主也是「注册用户」，但显示时应该盖过
+     *                 「注册用户」这个标签，否则站长在自己站里回复一句，
+     *                 读者看到的是「注册用户」而不是「站主」，身份信息就丢了
      */
-    public record Author(Long userId, String username, boolean registered) {
+    public record Author(Long userId, String username, boolean registered, boolean admin) {
     }
 }

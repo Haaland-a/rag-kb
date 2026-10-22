@@ -121,7 +121,8 @@
           >
             <header class="c-head">
               <span class="c-name">{{ c.nickname }}</span>
-              <span v-if="c.author.registered" class="c-tag reg">注册用户</span>
+              <span v-if="c.author.admin" class="c-tag owner">站主</span>
+              <span v-else-if="c.author.registered" class="c-tag reg">注册用户</span>
               <span v-if="c.visibility === 'PRIVATE'" class="c-tag priv">
                 <el-icon><Lock /></el-icon>悄悄话
               </span>
@@ -199,7 +200,8 @@
               <div v-for="r in c.replies" :key="r.id" class="reply">
                 <header class="r-head">
                   <span class="r-name">{{ r.nickname }}</span>
-                  <span v-if="r.author.registered" class="c-tag reg">注册用户</span>
+                  <span v-if="r.author.admin" class="c-tag owner">站主</span>
+                  <span v-else-if="r.author.registered" class="c-tag reg">注册用户</span>
                   <span v-if="r.hidden" class="c-tag hidden">已被隐藏</span>
                   <span class="c-time">{{ r.createdAt }}</span>
                 </header>
@@ -674,6 +676,11 @@ async function sendReply(parent) {
   border-radius: 4px;
   font-size: 11px;
   line-height: 1.7;
+}
+.c-tag.owner {
+  background: #fff7ed;
+  color: #b45309;
+  font-weight: 600;
 }
 .c-tag.reg {
   background: #eff6ff;

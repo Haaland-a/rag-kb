@@ -186,7 +186,8 @@
       <div v-for="c in momentComments" :key="c.id" class="comment" :class="{ 'c-private': c.visibility === 'PRIVATE', 'c-hidden': c.hidden }">
         <div class="comment-head">
           <strong>{{ c.nickname }}</strong>
-          <el-tag v-if="c.author?.registered" size="small" type="info">注册用户</el-tag>
+          <el-tag v-if="c.author?.admin" size="small" type="warning">站主</el-tag>
+          <el-tag v-else-if="c.author?.registered" size="small" type="info">注册用户</el-tag>
           <el-tag v-else size="small">游客</el-tag>
           <el-tag v-if="c.visibility === 'PRIVATE'" size="small" type="warning">悄悄话</el-tag>
           <el-tag v-if="c.hidden" size="small" type="danger">已屏蔽</el-tag>

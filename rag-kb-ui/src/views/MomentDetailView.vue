@@ -160,7 +160,8 @@
               >
                 <div class="mc-head">
                   <span class="mc-name">{{ c.nickname }}</span>
-                  <span v-if="c.author.registered" class="mc-tag">注册用户</span>
+                  <span v-if="c.author.admin" class="mc-tag mc-tag-owner">站主</span>
+                  <span v-else-if="c.author.registered" class="mc-tag">注册用户</span>
                   <span v-if="c.mine" class="mc-tag mc-tag-mine">我</span>
                   <span v-if="c.hidden" class="mc-tag mc-tag-hidden">已被站主隐藏</span>
                   <span class="mc-time">{{ c.createdAt }}</span>
@@ -648,6 +649,11 @@ function preview(url) {
   color: #475569;
   background: #eef1f5;
   border-radius: 3px;
+}
+.mc-tag-owner {
+  color: #b45309;
+  background: #fff7ed;
+  font-weight: 600;
 }
 .mc-tag-mine {
   color: #1e40af;

@@ -91,7 +91,8 @@
                 :class="{ 'mc-mine': c.mine }"
               >
                 <span class="mc-name">{{ c.nickname }}</span>
-                <span v-if="c.author.registered" class="mc-tag">注册用户</span>
+                <span v-if="c.author.admin" class="mc-tag mc-tag-owner">站主</span>
+                <span v-else-if="c.author.registered" class="mc-tag">注册用户</span>
                 <span v-if="c.mine" class="mc-tag mc-tag-mine">我</span>
                 <span v-if="c.hidden" class="mc-tag mc-tag-hidden">已被站主隐藏</span>
                 <span class="mc-time">{{ c.createdAt }}</span>
@@ -570,6 +571,11 @@ function preview(url) {
   background: #eff6ff;
   color: #1d4ed8;
   font-size: 10.5px;
+}
+.mc-tag-owner {
+  background: #fff7ed;
+  color: #b45309;
+  font-weight: 600;
 }
 .mc-tag-mine {
   background: #f0fdf4;

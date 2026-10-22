@@ -65,7 +65,8 @@
           <el-tag v-if="!c.read" size="small" type="danger" effect="plain">
             新
           </el-tag>
-          <el-tag v-if="c.author.registered" size="small" effect="plain">注册用户</el-tag>
+          <el-tag v-if="c.author.admin" size="small" effect="dark" type="warning">站主</el-tag>
+          <el-tag v-else-if="c.author.registered" size="small" effect="plain">注册用户</el-tag>
           <el-tag v-else size="small" type="info" effect="plain">游客</el-tag>
           <el-tag v-if="c.visibility === 'PRIVATE'" size="small" type="warning" effect="plain">
             悄悄话
@@ -98,7 +99,8 @@
         <div class="d-row">
           <span class="d-label">留言人</span>
           <span>{{ current.nickname }}</span>
-          <el-tag v-if="current.author.registered" size="small" effect="plain">
+          <el-tag v-if="current.author.admin" size="small" effect="dark" type="warning">站主</el-tag>
+          <el-tag v-else-if="current.author.registered" size="small" effect="plain">
             注册用户
           </el-tag>
           <el-tag v-else size="small" type="info" effect="plain">游客</el-tag>

@@ -3,6 +3,7 @@ package com.example.kb.service.impl;
 import com.example.kb.common.TimeFormat;
 import com.example.kb.domain.dto.CommentRequests;
 import com.example.kb.domain.po.KbComment;
+import com.example.kb.domain.po.KbUser;
 import com.example.kb.domain.po.KbMoment;
 import com.example.kb.domain.vo.CommentDto;
 import com.example.kb.domain.vo.CommentPage;
@@ -12,10 +13,13 @@ import com.example.kb.mapper.KbUserMapper;
 import com.example.kb.service.IAuthService;
 import com.example.kb.service.ICommentService;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -369,7 +373,44 @@ public class CommentServiceImpl implements ICommentService {
         return viewerId == null ? 0L : viewerId;
     }
 
+    /**
+     * 一次性查出这批留言里哪些作者是站主。
+     *
+     * <p>⚠️ 为什么不放在 toDto 里逐条查：一页 20 条留言会变成 20 次
+     * {@code SELECT * FROM kb_user WHERE id = ?}，加上回复就是 30 次。
+     * 这里先收集去重后的作者 id，一次 {@code selectBatchIds} 查完。</p>
+     *
+     * <p>⚠️ 查失败时<b>不抛异常</b>，一律按「普通注册用户」渲染。理由：
+     * 身份标签是展示信息，把整页留言拖成 500 不值得；最坏结果只是站主
+     * 的回复显示成「注册用户」，用户能看出不对但页面还是好的。</p>
+     *
+     * @return userId -> 是否站主。游客（userId 为 null）不在表里
+     */
+    private Map<Long, Boolean> adminFlags(List<KbComment> rows) {
+        Set<Long> ids = new LinkedHashSet<>();
+        for (KbComment c : rows) {
+            if (c.getUserId() != null) {
+                ids.add(c.getUserId());
+            }
+        }
+        Map<Long, Boolean> flags = new HashMap<>();
+        if (ids.isEmpty()) {
+            return flags;
+        }
+        try {
+            List<KbUser> users = userMapper.selectBatchIds(ids);
+            for (KbUser u : users) {
+                flags.put(u.getId(), authService.isAdmin(u.getUsername()));
+            }
+        }
+        catch (Exception e) {
+            log.warn("批量查留言作者身份失败，一律按普通注册用户展示：{}", e.getMessage());
+        }
+        return flags;
+    }
+
     private List<CommentDto> toDtos(List<KbComment> rows, Long viewerId, boolean adminView) {
+        Map<Long, Boolean> adminFlags = adminFlags(rows);
         Map<Long, List<KbComment>> repliesByParent = new LinkedHashMap<>();
         List<KbComment> topLevel = new ArrayList<>();
         for (KbComment c : rows) {
@@ -383,14 +424,14 @@ public class CommentServiceImpl implements ICommentService {
 
         List<CommentDto> out = new ArrayList<>(topLevel.size());
         for (KbComment c : topLevel) {
-            out.add(toDto(c, viewerId, adminView,
+            out.add(toDto(c, viewerId, adminView, adminFlags,
                     repliesByParent.getOrDefault(c.getId(), List.of())));
         }
         return out;
     }
 
     private CommentDto toDto(KbComment c, Long viewerId, boolean adminView,
-                             List<KbComment> replies) {
+                             Map<Long, Boolean> adminFlags, List<KbComment> replies) {
         boolean mine = viewerId != null && isAuthor(c, viewerId);
         boolean hidden = KbComment.STATUS_HIDDEN.equals(c.getStatusOrDefault());
         // ⚠️ 悄悄话的 visibility 只对站主和作者本人暴露。
@@ -400,7 +441,7 @@ public class CommentServiceImpl implements ICommentService {
 
         List<CommentDto> replyDtos = new ArrayList<>(replies.size());
         for (KbComment r : replies) {
-            replyDtos.add(toDto(r, viewerId, adminView, List.of()));
+            replyDtos.add(toDto(r, viewerId, adminView, adminFlags, List.of()));
         }
 
         return new CommentDto(
@@ -408,7 +449,8 @@ public class CommentServiceImpl implements ICommentService {
                 c.getMomentId(),
                 c.getNickname(),
                 c.getContent(),
-                new CommentDto.Author(c.getUserId(), null, c.getUserId() != null),
+                new CommentDto.Author(c.getUserId(), null, c.getUserId() != null,
+                        Boolean.TRUE.equals(adminFlags.get(c.getUserId()))),
                 mine,
                 hidden,
                 // 站主视角才给真实已读状态；访客视角恒 true（这字段对他没意义，
