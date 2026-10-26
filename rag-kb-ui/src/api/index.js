@@ -267,21 +267,37 @@ export const chatApi = {
 /**
  * 解析一个 SSE 帧：event: xxx\ndata: {...}
  *
- * <p>⚠️ 两个坑，都真实导致过「答案缺字」：</p>
+ * <p>⚠️ 三个坑，都真实导致过「答案缺字」：</p>
  *
  * <p>1. <b>不能对 data 行 trim()</b>。SSE 规定 {@code data:} 后只吃掉
  * <b>一个</b>可选空格，其余都是内容。后端逐 token 推流时，中文分词经常把
  * 空格留在词首（{@code " Spring Boot"}、{@code " - 2026."}），trim 掉就会
  * 拼成 {@code …Element PlusSpring Boot…} 这种粘字。</p>
  *
- * <p>2. <b>不能对 token 盲目 JSON.parse</b>。后端把 token 当 JSON 字符串发，
- * 但纯数字片段（{@code "2026.09"}、{@code "5"}、{@code "3."}）会被解析成
- * <b>number</b>，再走 {@code typeof d === 'string'} 就落空 → 整个 token 被
- * 静默丢掉。实测「2026.09 - 2026.10」会变成「202- 208」，{@code Spring Boot 3.5}
- * 会变成 {@code Spring Boot 35} —— 就是被吃掉这几个数字。</p>
+ * <p>2. <b>token 帧里的值不是 JSON，是裸文本</b>（见 {@link #TOKEN_IS_PLAIN}）。
+ * 早先对所有 data 行做 {@code JSON.parse}，纯数字片段 {@code "2026.09"}、
+ * {@code "5"}、{@code "3."} 会被解析成 <b>number</b>，再走
+ * {@code typeof d === 'string'} 就落空 → 整个 token 被静默丢掉。实测
+ * 「2026.09 - 2026.10」变成「202- 208」、{@code Spring Boot 3.5} 变成
+ * {@code Spring Boot 35} —— 就是被吃掉这几个数字。</p>
  *
- * <p>所以：只对看起来像 JSON 的（以 {@code &#123;} / {@code [} / {@code "} 开头）
- * 才 parse；token 的值一律用 {@link toTokenText} 转成字符串。</p>
+ * <p>3. <b>看起来像 JSON 的裸文本同样会中招</b>。引用角标 {@code "[4]"} 是
+ * 合法 JSON 数组，{@code '"'} 是合法 JSON 字符串（未闭合的引号）——
+ * 这两个都会被 {@code JSON.parse} 吃掉或抛错。所以判断条件不能停留在
+ * 「长得像不像 JSON」，必须按 <b>事件类型</b> 区分。</p>
+ *
+ * <p>结论：<b>只有 </b>{@code sources} / {@code done} / {@code error}
+ * 三个事件的值是 JSON，{@code token} 永远是裸文本，一个字符都不许解析。</p>
+ *
+ * <p>4. <b>{@code data:} 后面一个空格都不能去</b>。SSE 规范说字段值是
+ * 「冒号后可选一个空格再跟值」，但 Spring WebFlux 的
+ * {@code ServerSentEventHttpMessageWriter.writeStringData} 写的是
+ * {@code "\ndata:"} —— <b>它不加那个空格</b>。所以服务端发
+ * {@code data: Spring Boot} 时，冒号后那个空格是从 token 本身来的
+ * （模型输出 {@code "- 后端： Spring Boot 3.5.15"} 这种，分词把空格留在了
+ * 词首）。再「吃掉一个空格」就会把 {@code Spring Boot} 削成 {@code Spring Boot}
+ * 前面粘上上一个 token，实测出现过 {@code Spring Boot3.5.15}、
+ * {@code -**后端**} 这种粘连。</p>
  */
 function handleFrame(frame, handlers) {
   let event = 'message'
@@ -291,15 +307,21 @@ function handleFrame(frame, handlers) {
     if (clean.startsWith('event:')) {
       event = clean.slice(6).trim()
     } else if (clean.startsWith('data:')) {
-      // 只吃掉「data:」后面的第一个空格，其余原样保留
-      const v = clean.slice(5)
-      dataLines.push(v.startsWith(' ') ? v.slice(1) : v)
+      // ⚠️ 一个字符都不能去：Spring 写的是 "data:"（无空格），
+      //    这里冒号后的空格属于内容本身
+      dataLines.push(clean.slice(5))
     }
   }
   if (!dataLines.length) return
   const raw = dataLines.join('\n')
 
-  // 只有像 JSON 的才解析；裸文本（含 "2026.09"、"" 这种）原样用
+  // ↓↓↓ 关键：token 是裸文本，绝不能 JSON.parse ↓↓↓
+  if (event === 'token') {
+    handlers.onToken?.(raw)
+    return
+  }
+
+  // 其余事件（sources / done / error）才是 JSON；解析失败就退回原样
   let data = raw
   const looksJson = raw.startsWith('{') || raw.startsWith('[') || raw.startsWith('"')
   if (looksJson) {
@@ -311,16 +333,16 @@ function handleFrame(frame, handlers) {
   }
 
   if (event === 'sources') handlers.onSources?.(data)
-  else if (event === 'token') handlers.onToken?.(toTokenText(data))
   else if (event === 'done') handlers.onDone?.(data)
   else if (event === 'error') handlers.onError?.(typeof data === 'object' ? data?.message : data)
+  else handlers.onToken?.(raw) // 兜底：未知事件若按 token 处理，也当裸文本
 }
 
 /**
  * 把 token 帧的值转成要追加的文本。
  *
  * <p>⚠️ 必须「什么都转成字符串」而不是「只接受 string」：
- * 模型输出的纯数字片段会被 JSON 解析成 number，漏掉就是答案缺字。</p>
+ * 万一上游哪天把 token 包成 JSON（数字/布尔），漏掉就是答案缺字。</p>
  */
 function toTokenText(data) {
   if (data === null || data === undefined) return ''

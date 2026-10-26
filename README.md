@@ -910,19 +910,28 @@ prompt 里没有资料，模型只能老实回答「资料中未提及」。**�
 
 > **第 38 条的修法（`rag-kb-ui/src/api/index.js` 的 `handleFrame`）**
 >
-> 1. `data:` 后**只吃掉一个可选空格**，不做 `trim()`：
->    ```js
->    const v = clean.slice(5)
->    dataLines.push(v.startsWith(' ') ? v.slice(1) : v)
->    ```
-> 2. **只对像 JSON 的才 parse**（以 `{` / `[` / `"` 开头），裸文本原样用：
->    ```js
->    const looksJson = raw.startsWith('{') || raw.startsWith('[') || raw.startsWith('"')
->    ```
-> 3. token 一律经 `toTokenText()` 转字符串，**number 也要 `String(data)`**，不能只认 `string`。
+> 三个独立的坑，缺一不可：
 >
-> ⚠️ 这个 bug 后端和模型都是对的 —— 数据库里存的答案原文完整无误，只有浏览器渲染时丢字。
+> 1. **`data:` 后一个空格都不能去**。SSE 规范说「冒号后可选一个空格再跟值」，
+>    但 Spring WebFlux 的 `ServerSentEventHttpMessageWriter.writeStringData`
+>    写的是 `"\ndata:"` —— **它不加那个空格**。所以 `data: Spring Boot` 里冒号后
+>    那个空格是从 token 本身来的（模型输出 `- **后端**： Spring Boot 3.5.15`，
+>    分词把空格留在词首）。再「吃掉一个空格」就粘成 `Spring Boot3.5.15`。
+>    ```js
+>    dataLines.push(clean.slice(5))   // 一个字符都不去
+>    ```
+> 2. **只对 sources / done / error 解析 JSON，token 永远是裸文本**。
+>    `[4]` 是合法 JSON 数组、`"` 是未闭合引号，都会中招或被吞掉。
+>    ```js
+>    if (event === 'token') { handlers.onToken?.(raw); return }
+>    ```
+> 3. **即使真要转，也不能只认 `string`**：纯数字 token 会被 `JSON.parse`
+>    成 number。保留 `toTokenText()` 做兜底。
+>
+> ⚠️ 这个 bug 后端和模型都是对的 —— `kb_chat` 里存的答案原文完整无误，只有浏览器渲染时丢字。
 > 排查时**先看库里存的原文**能立刻区分是「生成问题」还是「渲染问题」。
+> 验证方式：把前端解析逻辑用 Python 复刻一遍，跟 `kb_chat.answer` 逐字节 `difflib.ndiff` 比对，
+> 差异数必须是 0。
 
 ---
 
