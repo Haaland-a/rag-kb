@@ -264,23 +264,69 @@ export const chatApi = {
   }
 }
 
-/** 解析一个 SSE 帧：event: xxx\ndata: {...} */
+/**
+ * 解析一个 SSE 帧：event: xxx\ndata: {...}
+ *
+ * <p>⚠️ 两个坑，都真实导致过「答案缺字」：</p>
+ *
+ * <p>1. <b>不能对 data 行 trim()</b>。SSE 规定 {@code data:} 后只吃掉
+ * <b>一个</b>可选空格，其余都是内容。后端逐 token 推流时，中文分词经常把
+ * 空格留在词首（{@code " Spring Boot"}、{@code " - 2026."}），trim 掉就会
+ * 拼成 {@code …Element PlusSpring Boot…} 这种粘字。</p>
+ *
+ * <p>2. <b>不能对 token 盲目 JSON.parse</b>。后端把 token 当 JSON 字符串发，
+ * 但纯数字片段（{@code "2026.09"}、{@code "5"}、{@code "3."}）会被解析成
+ * <b>number</b>，再走 {@code typeof d === 'string'} 就落空 → 整个 token 被
+ * 静默丢掉。实测「2026.09 - 2026.10」会变成「202- 208」，{@code Spring Boot 3.5}
+ * 会变成 {@code Spring Boot 35} —— 就是被吃掉这几个数字。</p>
+ *
+ * <p>所以：只对看起来像 JSON 的（以 {@code &#123;} / {@code [} / {@code "} 开头）
+ * 才 parse；token 的值一律用 {@link toTokenText} 转成字符串。</p>
+ */
 function handleFrame(frame, handlers) {
   let event = 'message'
   const dataLines = []
   for (const line of frame.split('\n')) {
-    if (line.startsWith('event:')) event = line.slice(6).trim()
-    else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim())
+    const clean = line.endsWith('\r') ? line.slice(0, -1) : line
+    if (clean.startsWith('event:')) {
+      event = clean.slice(6).trim()
+    } else if (clean.startsWith('data:')) {
+      // 只吃掉「data:」后面的第一个空格，其余原样保留
+      const v = clean.slice(5)
+      dataLines.push(v.startsWith(' ') ? v.slice(1) : v)
+    }
   }
   if (!dataLines.length) return
-  let data
-  try {
-    data = JSON.parse(dataLines.join('\n'))
-  } catch {
-    data = dataLines.join('\n')
+  const raw = dataLines.join('\n')
+
+  // 只有像 JSON 的才解析；裸文本（含 "2026.09"、"" 这种）原样用
+  let data = raw
+  const looksJson = raw.startsWith('{') || raw.startsWith('[') || raw.startsWith('"')
+  if (looksJson) {
+    try {
+      data = JSON.parse(raw)
+    } catch {
+      data = raw
+    }
   }
+
   if (event === 'sources') handlers.onSources?.(data)
-  else if (event === 'token') handlers.onToken?.(typeof data === 'string' ? data : data?.text ?? '')
+  else if (event === 'token') handlers.onToken?.(toTokenText(data))
   else if (event === 'done') handlers.onDone?.(data)
-  else if (event === 'error') handlers.onError?.(data.message)
+  else if (event === 'error') handlers.onError?.(typeof data === 'object' ? data?.message : data)
+}
+
+/**
+ * 把 token 帧的值转成要追加的文本。
+ *
+ * <p>⚠️ 必须「什么都转成字符串」而不是「只接受 string」：
+ * 模型输出的纯数字片段会被 JSON 解析成 number，漏掉就是答案缺字。</p>
+ */
+function toTokenText(data) {
+  if (data === null || data === undefined) return ''
+  if (typeof data === 'string') return data
+  if (typeof data === 'number' || typeof data === 'boolean') return String(data)
+  // 兼容将来可能改成 { text: '...' } 的结构
+  if (typeof data === 'object' && typeof data.text === 'string') return data.text
+  return ''
 }

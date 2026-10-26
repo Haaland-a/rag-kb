@@ -906,6 +906,23 @@ prompt 里没有资料，模型只能老实回答「资料中未提及」。**�
 | 35 | 概括性问题（「这里都讲了些什么？」）永远答「资料中未提及」 | 语义上和任何一段具体资料都不接近，实测余弦相似度最高只有 **0.2271**，而阈值 0.35 → 召回为空 → prompt 里没资料 | 一条都没召回时用 **0.15** 降级重试一次（`Retrieved.degraded` 标记）；把「没资料」显式写进 prompt；备选问题换成语料能答的 |
 | 36 | 点「文档管理」完全没反应（不跳转、不报错、不提示） | Vite 每次构建给 chunk 加内容哈希，旧 chunk 被删；浏览器缓存里的旧 `index.html` 仍指向它 → 动态 import 404，Vue Router 把跳转静默吞掉，控制台只有一行 `Unable to preload CSS for ...` | ① `index.html` 设 `Cache-Control: no-cache`、`/assets/**` 设一年长缓存；② `router.onError` 识别 chunk 加载失败后整页重载一次（`sessionStorage` 记时间戳防死循环） |
 | 37 | 部署新版本后老用户仍看到旧页面 | `index.html` 没有 `Cache-Control`，只有 `Last-Modified`，浏览器可以一直用缓存里的副本 | 同上：`index.html` 必须 `no-cache`，带哈希的 `assets` 才适合长缓存 |
+| 38 | 流式答案「缺字」：`2026.09 - 2026.10` 渲染成 `202- 208`、`Spring Boot 3.5` 渲染成 `Spring Boot 35` | 前端 SSE 解析两个坑：(a) `data:` 行被 `trim()`，中文分词推到词首的空格被吃掉 → 粘字；(b) 纯数字 token（`"2026.09"`、`"5"`）被 `JSON.parse` 成 **number**，`typeof === 'string'` 判断落空 → **整个 token 静默丢弃** | 见下条说明 |
+
+> **第 38 条的修法（`rag-kb-ui/src/api/index.js` 的 `handleFrame`）**
+>
+> 1. `data:` 后**只吃掉一个可选空格**，不做 `trim()`：
+>    ```js
+>    const v = clean.slice(5)
+>    dataLines.push(v.startsWith(' ') ? v.slice(1) : v)
+>    ```
+> 2. **只对像 JSON 的才 parse**（以 `{` / `[` / `"` 开头），裸文本原样用：
+>    ```js
+>    const looksJson = raw.startsWith('{') || raw.startsWith('[') || raw.startsWith('"')
+>    ```
+> 3. token 一律经 `toTokenText()` 转字符串，**number 也要 `String(data)`**，不能只认 `string`。
+>
+> ⚠️ 这个 bug 后端和模型都是对的 —— 数据库里存的答案原文完整无误，只有浏览器渲染时丢字。
+> 排查时**先看库里存的原文**能立刻区分是「生成问题」还是「渲染问题」。
 
 ---
 

@@ -76,8 +76,8 @@ class PiiMaskerTest {
     @Test
     @DisplayName("自定义词（姓名/学校）能按字面遮蔽，且长词优先")
     void masksExtraTerms() {
-        java.util.List<String> terms = java.util.List.of("李宇超", "山西农业大学");
-        String out = PiiMasker.mask("李宇超 山西农业大学 本科", terms);
+        java.util.List<String> terms = java.util.List.of("张三", "某某大学");
+        String out = PiiMasker.mask("张三 某某大学 本科", terms);
         assertEquals("[已隐藏] [已隐藏] 本科", out);
         // 长词优先生效：如果先换了「山西」，就会留下「[已隐藏]农业大学」
         assertFalse(out.contains("农业大学"));
