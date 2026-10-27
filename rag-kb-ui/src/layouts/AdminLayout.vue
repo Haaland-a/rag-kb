@@ -1,34 +1,46 @@
-<template>
+﻿<template>
   <div class="shell">
-    <!-- 顶栏：站主后台导航 -->
-    <header class="topbar">
-      <div class="topbar-inner">
-        <div class="brand">
-          <router-link to="/" class="brand-link">
-            <el-icon><HomeFilled /></el-icon>
-            <span>{{ siteTitle }}</span>
-          </router-link>
-          <el-tag size="small" type="info" effect="plain" class="role-tag">站主</el-tag>
-        </div>
+    <!-- 左侧导航：9 个入口横向排一行会挤成两行，竖排才是后台的常规形态 -->
+    <aside class="sidebar">
+      <router-link to="/" class="brand">
+        <span class="brand-mark">{{ brandInitial }}</span>
+        <span class="brand-text">
+          <span class="brand-name">{{ siteTitle }}</span>
+          <span class="brand-role">站主后台</span>
+        </span>
+      </router-link>
 
-        <nav class="nav">
-          <router-link
-            v-for="item in navItems"
-            :key="item.to"
-            :to="item.to"
-            class="nav-item"
-            active-class="nav-item--active"
-          >
-            <el-icon><component :is="item.icon" /></el-icon>
-            <span>{{ item.label }}</span>
-            <!-- 未读留言：红点不给数字，避免每次都要精确同步；有这个点就说明有新东西看 -->
-            <span v-if="item.badge && unreadComments > 0" class="nav-dot" />
-          </router-link>
-        </nav>
+      <nav class="nav">
+        <router-link
+          v-for="item in navItems"
+          :key="item.to"
+          :to="item.to"
+          class="nav-item"
+          active-class="nav-item--active"
+        >
+          <el-icon class="nav-icon"><component :is="item.icon" /></el-icon>
+          <span class="nav-label">{{ item.label }}</span>
+          <!-- 未读留言：红点不给数字，避免每次都要精确同步；有这个点就说明有新东西看 -->
+          <span v-if="item.badge && unreadComments > 0" class="nav-dot" />
+        </router-link>
+      </nav>
+
+      <div class="sidebar-foot">
+        <router-link to="/" class="nav-item nav-item--ghost">
+          <el-icon class="nav-icon"><HomeFilled /></el-icon>
+          <span class="nav-label">返回主页</span>
+        </router-link>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <h1 class="page-title">{{ pageTitle }}</h1>
 
         <el-dropdown @command="onCommand">
           <span class="user">
-            {{ auth.displayName }}
+            <span class="user-avatar">{{ userInitial }}</span>
+            <span class="user-name">{{ auth.displayName }}</span>
             <el-icon><ArrowDown /></el-icon>
           </span>
           <template #dropdown>
@@ -38,12 +50,12 @@
             </el-dropdown-menu>
           </template>
         </el-dropdown>
-      </div>
-    </header>
+      </header>
 
-    <main class="content">
-      <router-view />
-    </main>
+      <main class="content">
+        <router-view />
+      </main>
+    </div>
 
     <!-- 修改密码 -->
     <el-dialog v-model="pwdVisible" title="修改密码" width="420px">
@@ -67,8 +79,8 @@
 </template>
 
 <script setup>
-import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
   ArrowDown,
@@ -78,9 +90,7 @@ import {
   Document,
   HomeFilled,
   Location,
-  Lock,
   Odometer,
-  Picture,
   Search,
   User,
   UserFilled
@@ -88,10 +98,18 @@ import {
 import { siteApi, authApi, commentApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 
+const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 
 const siteTitle = ref('Demo 的知识库')
+
+/** 顶栏标题跟着路由 meta.title 走，不用每个页面自己画标题 */
+const pageTitle = computed(() => route.meta?.title || '后台')
+
+/** 侧栏头像取站名/昵称首字，没有就 H */
+const brandInitial = computed(() => (auth.displayName || siteTitle.value || 'H').trim().charAt(0).toUpperCase())
+const userInitial = computed(() => (auth.displayName || 'H').trim().charAt(0).toUpperCase())
 
 /** 未读留言数，导航上那个小红点 */
 const unreadComments = ref(0)
@@ -201,94 +219,257 @@ async function submitPassword() {
 .shell {
   min-height: 100vh;
   display: flex;
-  flex-direction: column;
   background: #f7f8fa;
 }
 
-.topbar {
+/* ---------------- 左侧导航 ---------------- */
+.sidebar {
+  width: 224px;
+  flex: 0 0 224px;
+  display: flex;
+  flex-direction: column;
   background: #fff;
-  border-bottom: 1px solid #eef0f4;
+  border-right: 1px solid #eef0f4;
   position: sticky;
   top: 0;
-  z-index: 10;
+  height: 100vh;
+  padding: 18px 12px 14px;
+  box-sizing: border-box;
 }
-.topbar-inner {
-  max-width: 1080px;
-  margin: 0 auto;
-  height: 56px;
-  padding: 0 20px;
-  display: flex;
-  align-items: center;
-  gap: 24px;
-}
+
 .brand {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  padding: 4px 8px 18px;
+  text-decoration: none;
+  min-width: 0;
 }
-.brand-link {
+.brand-mark {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
   display: flex;
   align-items: center;
-  gap: 6px;
-  color: #1e293b;
+  justify-content: center;
+  letter-spacing: 0.5px;
+}
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.brand-name {
+  font-size: 14px;
   font-weight: 600;
-  font-size: 15px;
-  text-decoration: none;
+  color: #0f172a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.role-tag {
-  transform: scale(0.9);
+.brand-role {
+  font-size: 11px;
+  color: #94a3b8;
+  letter-spacing: 0.3px;
 }
+
 .nav {
   flex: 1;
   display: flex;
-  gap: 4px;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  padding: 2px 0;
 }
+
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 7px 12px;
-  border-radius: 7px;
-  font-size: 14px;
-  color: #64748b;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  color: #475569;
   text-decoration: none;
-  transition: all 0.15s;
+  /* 关键：不换行、不被压扁。之前 9 个入口挤一行，「概览」被拆成了「概 / 览」 */
+  white-space: nowrap;
+  flex: 0 0 auto;
   position: relative;
+  transition: background 0.15s, color 0.15s;
 }
 .nav-item:hover {
   background: #f1f5f9;
-  color: #1e293b;
+  color: #0f172a;
 }
+/* 选中态：浅蓝底 + 左侧细竖条，比整块高亮更轻 */
 .nav-item--active {
   background: #eff6ff;
   color: #2563eb;
-  font-weight: 500;
+  font-weight: 600;
 }
+.nav-item--active::before {
+  content: '';
+  position: absolute;
+  left: -12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 18px;
+  border-radius: 0 3px 3px 0;
+  background: #2563eb;
+}
+.nav-icon {
+  font-size: 16px;
+  flex: 0 0 16px;
+}
+.nav-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* 未读留言的小红点 */
 .nav-dot {
   position: absolute;
-  top: 5px;
-  right: 4px;
-  width: 7px;
-  height: 7px;
+  top: 6px;
+  right: 10px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: #ef4444;
   box-shadow: 0 0 0 2px #fff;
 }
+
+.sidebar-foot {
+  border-top: 1px solid #f1f5f9;
+  padding-top: 8px;
+  margin-top: 8px;
+}
+.nav-item--ghost {
+  color: #94a3b8;
+  font-size: 13px;
+}
+.nav-item--ghost:hover {
+  color: #2563eb;
+}
+
+/* ---------------- 右侧主区 ---------------- */
+.main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  height: 56px;
+  flex: 0 0 56px;
+  background: rgba(255, 255, 255, 0.86);
+  backdrop-filter: saturate(180%) blur(8px);
+  border-bottom: 1px solid #eef0f4;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+}
+.page-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #0f172a;
+  letter-spacing: 0.2px;
+}
+
 .user {
   display: flex;
   align-items: center;
-  gap: 4px;
-  font-size: 14px;
+  gap: 8px;
+  font-size: 13.5px;
   color: #475569;
   cursor: pointer;
   outline: none;
+  padding: 4px 8px 4px 4px;
+  border-radius: 999px;
+  transition: background 0.15s;
 }
+.user:hover {
+  background: #f1f5f9;
+}
+.user-avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.user-name {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .content {
   flex: 1;
-  max-width: 1080px;
+  max-width: 1240px;
   width: 100%;
   margin: 0 auto;
-  padding: 22px 20px 40px;
+  padding: 22px 28px 40px;
+  min-width: 0;
+  box-sizing: border-box;
+}
+/* 表格类页面（文档管理）列总宽固定，内容区太窄会把「操作」列挤掉。
+   宁可让表格内部横向滚动，也不要截掉按钮。 */
+.content :deep(.el-table) {
+  width: 100%;
+}
+.content :deep(.el-table__body-wrapper) {
+  overflow-x: auto;
+}
+
+/* 窄屏：侧栏收成图标条，避免挤压主内容 */
+@media (max-width: 900px) {
+  .sidebar {
+    width: 64px;
+    flex: 0 0 64px;
+    padding: 14px 8px;
+    align-items: center;
+  }
+  .brand {
+    padding: 4px 0 14px;
+    justify-content: center;
+  }
+  .brand-text,
+  .nav-label,
+  .user-name {
+    display: none;
+  }
+  .nav-item {
+    justify-content: center;
+    padding: 10px;
+  }
+  .nav-item--active::before {
+    left: -8px;
+  }
+  .nav-dot {
+    top: 8px;
+    right: 8px;
+  }
+  .content {
+    padding: 18px 14px 32px;
+  }
 }
 </style>
