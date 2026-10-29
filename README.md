@@ -908,6 +908,7 @@ prompt 里没有资料，模型只能老实回答「资料中未提及」。**�
 | 37 | 部署新版本后老用户仍看到旧页面 | `index.html` 没有 `Cache-Control`，只有 `Last-Modified`，浏览器可以一直用缓存里的副本 | 同上：`index.html` 必须 `no-cache`，带哈希的 `assets` 才适合长缓存 |
 | 38 | 流式答案「缺字」：`2026.09 - 2026.10` 渲染成 `202- 208`、`Spring Boot 3.5` 渲染成 `Spring Boot 35` | 前端 SSE 解析两个坑：(a) `data:` 行被 `trim()`，中文分词推到词首的空格被吃掉 → 粘字；(b) 纯数字 token（`"2026.09"`、`"5"`）被 `JSON.parse` 成 **number**，`typeof === 'string'` 判断落空 → **整个 token 静默丢弃** | 见下条说明 |
 | 39 | 后台顶栏 9 个入口挤成两行，「概览」被拆成「概 / 览」；文档表格「操作」列整个消失（删除按钮点不到） | (a) 顶栏 horizontal nav 没有 `white-space: nowrap`，宽度不够时中文会被逐字折行；(b) 内容区 `max-width: 1080px`，而文档表格 8 列固定宽度加起来 1112px，超出部分被 `overflow: hidden` 裁掉 | 顶栏改左侧竖排边栏（`nav-item` 加 `flex: 0 0 auto` + `white-space: nowrap`，从根上不可能被压扁）；内容区放宽到 1240px，并给 `.el-table__body-wrapper` 加 `overflow-x: auto` 兜底 |
+| 40 | 后台「留言管理」每次打开，**所有留言都顶着「新」标签**；可顶部未读数却是 0。同理「访问记录」里站主自己的访问永远不标「本人」 | `@Select` 里写 `SELECT *`，返回列标签是 `is_read` / `is_admin`，`map-underscore-to-camel-case` 推成属性 `isRead` / `isAdmin`，而实体字段叫 `read` / `admin` —— 对不上就一直是默认值 `false`。**`@TableField("is_read")` 只对 `BaseMapper` 自带方法生效，自定义 `@Select` 完全不认** | 两张表的自定义查询改显式列清单 + 别名：`is_read AS read`、`is_admin AS admin`，让列标签直接等于属性名，绕开驼峰推断（`KbCommentMapper.COLUMNS` / `KbVisitMapper.COLUMNS`）。排查时先比「未读数」和「列表里的 read」：一个对一个不对，就锁定是映射问题而不是 SQL 条件问题 |
 
 > **第 38 条的修法（`rag-kb-ui/src/api/index.js` 的 `handleFrame`）**
 >
