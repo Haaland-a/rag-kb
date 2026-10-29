@@ -49,10 +49,28 @@ public interface KbCommentMapper extends BaseMapper<KbComment> {
             " AND (visibility = 'PUBLIC' AND status = 'VISIBLE'"
                     + " OR (user_id IS NOT NULL AND user_id = #{viewerId}))";
 
+    /**
+     * 显式列清单，<b>不要改用 {@code SELECT *}</b>。
+     *
+     * <p>⚠️ 这里踩过一次：{@code is_read} 经 {@code map-underscore-to-camel-case}
+     * 会变成属性名 {@code isRead}，而实体字段叫 {@code read} —— 对不上就一直
+     * 拿默认值 {@code false}，于是后台每条留言都顶着「新」标签，可未读数是对的
+     * （未读数走的是另一个 count 查询），看起来像前端 bug，其实是映射漏了。</p>
+     *
+     * <p>⚠️ 别指望 {@code @TableField("is_read")} 救：它只对 MyBatis-Plus 自带的
+     * {@code BaseMapper} 方法生效，自定义 {@code @Select} 完全不认。</p>
+     *
+     * <p>所以这里显式列出每一列，给 {@code is_read} 起别名 {@code read}，
+     * 让列标签直接等于属性名，绕开驼峰推断。</p>
+     */
+    String COLUMNS =
+            "id, moment_id, user_id, nickname, content, ip, device_id,"
+                    + " visibility, status, parent_id, is_read AS read, created_at";
+
     // ==================== 访客视角 ====================
 
     /** 留言板（moment_id IS NULL）的访客视角分页 */
-    @Select("SELECT * FROM kb_comment WHERE moment_id IS NULL" + VISIBLE_CLAUSE
+    @Select("SELECT " + COLUMNS + " FROM kb_comment WHERE moment_id IS NULL" + VISIBLE_CLAUSE
             + " ORDER BY created_at DESC LIMIT #{limit} OFFSET #{offset}")
     List<KbComment> selectBoardForVisitor(@Param("viewerId") long viewerId,
                                           @Param("limit") int limit,
@@ -62,7 +80,7 @@ public interface KbCommentMapper extends BaseMapper<KbComment> {
     long countBoardForVisitor(@Param("viewerId") long viewerId);
 
     /** 某条动态下的评论，访客视角 */
-    @Select("SELECT * FROM kb_comment WHERE moment_id = #{momentId}" + VISIBLE_CLAUSE
+    @Select("SELECT " + COLUMNS + " FROM kb_comment WHERE moment_id = #{momentId}" + VISIBLE_CLAUSE
             + " ORDER BY created_at ASC LIMIT #{limit}")
     List<KbComment> selectMomentCommentsForVisitor(@Param("momentId") long momentId,
                                                    @Param("viewerId") long viewerId,
@@ -78,8 +96,11 @@ public interface KbCommentMapper extends BaseMapper<KbComment> {
      * 只会给出「整批里最早的 N 条」，而不是「每条动态各 N 条」。</p>
      */
     @Select("<script>SELECT * FROM ("
-            + "  SELECT c.*, ROW_NUMBER() OVER (PARTITION BY c.moment_id"
-            + "    ORDER BY c.created_at ASC, c.id ASC) AS rn"
+            + "  SELECT c.id, c.moment_id, c.user_id, c.nickname, c.content, c.ip,"
+            + "    c.device_id, c.visibility, c.status, c.parent_id,"
+            + "    c.is_read AS read, c.created_at,"
+            + "    ROW_NUMBER() OVER (PARTITION BY c.moment_id"
+            + "      ORDER BY c.created_at ASC, c.id ASC) AS rn"
             + "  FROM kb_comment c WHERE c.moment_id IN "
             + "<foreach collection='momentIds' item='m' open='(' separator=',' close=')'>#{m}</foreach>"
             + "    AND (c.visibility = 'PUBLIC' AND c.status = 'VISIBLE'"
@@ -118,7 +139,7 @@ public interface KbCommentMapper extends BaseMapper<KbComment> {
      * <p>⚠️ 不要用「拉全站留言再 filter」代替：留言攒到几百条以后每次看一条
      * 动态都要把整张表捞进内存，而且分页上限一截断就静默丢数据。</p>
      */
-    @Select("SELECT * FROM kb_comment WHERE moment_id = #{momentId}"
+    @Select("SELECT " + COLUMNS + " FROM kb_comment WHERE moment_id = #{momentId}"
             + " ORDER BY created_at ASC LIMIT #{limit}")
     List<KbComment> selectMomentCommentsForAdmin(@Param("momentId") long momentId,
                                                  @Param("limit") int limit);
@@ -134,7 +155,7 @@ public interface KbCommentMapper extends BaseMapper<KbComment> {
      * 「只要动态评论」—— 传 false 时既不是「只要留言板」，也不该是「全部」，
      * 于是前端只能拉全量再 filter，而 total 和分页还是错的。</p>
      */
-    @Select("<script>SELECT * FROM kb_comment WHERE 1 = 1"
+    @Select("<script>SELECT " + COLUMNS + " FROM kb_comment WHERE 1 = 1"
             + "<if test='unreadOnly != null and unreadOnly'> AND is_read = FALSE</if>"
             + "<if test=\"scope != null and scope == 'board'\"> AND moment_id IS NULL</if>"
             + "<if test=\"scope != null and scope == 'moment'\"> AND moment_id IS NOT NULL</if>"

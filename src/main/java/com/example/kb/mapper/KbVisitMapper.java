@@ -21,8 +21,24 @@ import java.util.List;
 @Mapper
 public interface KbVisitMapper extends BaseMapper<KbVisit> {
 
+    /**
+     * 显式列清单，<b>不要改用 {@code SELECT *}</b>。
+     *
+     * <p>⚠️ 和 {@code KbCommentMapper} 同一个坑：{@code is_admin} 经驼峰转换会变成
+     * 属性名 {@code isAdmin}，而实体字段叫 {@code admin} —— 对不上就一直拿默认值
+     * {@code false}，于是后台「访问记录」里站主自己的访问永远不会被标成「本人」。</p>
+     *
+     * <p>⚠️ {@code @TableField("is_admin")} 只对 {@code BaseMapper} 的方法生效，
+     * 自定义 {@code @Select} 不认。所以这里显式列列并给 {@code is_admin} 起别名
+     * {@code admin}，让列标签直接等于属性名。</p>
+     */
+    String COLUMNS =
+            "id, ip, path, question, country, region, city, isp,"
+                    + " user_agent, referer, is_admin AS admin, geo_status, created_at";
+
     /** 后台补归属地用：取一批还没查过归属地的记录 */
-    @Select("SELECT * FROM kb_visit WHERE geo_status = 'PENDING' ORDER BY id LIMIT #{limit}")
+    @Select("SELECT " + COLUMNS + " FROM kb_visit"
+            + " WHERE geo_status = 'PENDING' ORDER BY id LIMIT #{limit}")
     List<KbVisit> selectPendingGeo(@Param("limit") int limit);
 
     /** 归属地查到了，写回五个字段并把状态改成 DONE */
@@ -39,7 +55,8 @@ public interface KbVisitMapper extends BaseMapper<KbVisit> {
     int markGeoFailed(@Param("id") long id);
 
     /** 后台列表用，倒序分页 */
-    @Select("SELECT * FROM kb_visit ORDER BY created_at DESC, id DESC LIMIT #{limit} OFFSET #{offset}")
+    @Select("SELECT " + COLUMNS + " FROM kb_visit"
+            + " ORDER BY created_at DESC, id DESC LIMIT #{limit} OFFSET #{offset}")
     List<KbVisit> selectRecent(@Param("limit") int limit, @Param("offset") int offset);
 
     /**
